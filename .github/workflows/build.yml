@@ -1,0 +1,24 @@
+name: macOS build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Swift version
+        run: swift --version
+      - name: Build app bundle
+        run: sh scripts/build-app.sh
+      - name: Validate app metadata
+        run: |
+          plutil -lint OpenRayneoBridge.app/Contents/Info.plist
+          test -x OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge
