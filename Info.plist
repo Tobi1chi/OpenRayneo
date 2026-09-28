@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>openrayneo-bridge</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.openrayneo.bridge</string>
+	<key>CFBundleName</key>
+	<string>OpenRayneo Bridge</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>OpenRayneo Bridge connects to RayNeo iO glasses to send notifications and teleprompter text.</string>
+</dict>
+</plist>

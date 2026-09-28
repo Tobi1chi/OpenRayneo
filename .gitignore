@@ -1,0 +1,24 @@
+# Swift and local app builds
+.build/
+.swiftpm/
+*.app/
+DerivedData/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Official packages, device captures, and analysis workspace
+*.apk
+*.btsnoop
+btsnoop*
+*.pcap
+*.pcapng
+bugreport*.zip
+captures/
+analysis/
+
+# Runtime logs and macOS metadata
+*.log
+.DS_Store
