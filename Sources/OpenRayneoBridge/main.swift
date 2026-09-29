@@ -20,6 +20,7 @@ struct RemoteMessage {
     let action: UInt64?
     let messageType: UInt64?
     let json: [String: Any]?
+    let audioData: Data?
 }
 
 enum ProtocolCodec {
@@ -212,7 +213,8 @@ enum ProtocolCodec {
         let messageType = parsed.first(where: { $0.0 == 2 && $0.1 == 0 })?.2
         let jsonData = parsed.first(where: { $0.0 == 3 && $0.1 == 2 })?.3
         let json = jsonData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-        return RemoteMessage(protocolID: protocolID, sequence: UInt16(body[0]) << 8 | UInt16(body[1]), receivedAt: Date(), protobuf: protobuf, action: action, messageType: messageType, json: json)
+        let audioData = parsed.first(where: { $0.0 == 4 && $0.1 == 2 })?.3
+        return RemoteMessage(protocolID: protocolID, sequence: UInt16(body[0]) << 8 | UInt16(body[1]), receivedAt: Date(), protobuf: protobuf, action: action, messageType: messageType, json: json, audioData: audioData)
     }
 
     static func firstFieldNumber(_ protobuf: Data) -> UInt64? {
@@ -687,6 +689,34 @@ final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate {
     private var remoteMessages: [RemoteMessage] = []
     private var recentDisplayMessages: [[String: Any]] = []
     private var droppedDisplayAudioPackets = 0
+    private var audioHandler: ((RemoteMessage) -> Void)?
+    private var lifeLogWakeHandler: ((RemoteMessage) -> Void)?
+    private var lifeLogEvents: [[String: Any]] = []
+    private var lifeLogAudioCounts: [String: Int] = [:]
+    private var lifeLogLastAudioMetadata: [String: Any] = [:]
+
+    func observeLifeLog(_ wake: ((RemoteMessage) -> Void)?) {
+        receiveCondition.lock()
+        defer { receiveCondition.unlock() }
+        lifeLogWakeHandler = wake
+        if wake != nil {
+            lifeLogEvents = []
+            lifeLogAudioCounts = [:]
+            lifeLogLastAudioMetadata = [:]
+        }
+    }
+
+    var lifeLogDiagnostics: [String: Any] {
+        receiveCondition.lock()
+        defer { receiveCondition.unlock() }
+        return ["events": lifeLogEvents, "audio": lifeLogAudioCounts, "lastAudioMetadata": lifeLogLastAudioMetadata]
+    }
+
+    func setAudioHandler(_ handler: ((RemoteMessage) -> Void)?) {
+        receiveCondition.lock()
+        defer { receiveCondition.unlock() }
+        audioHandler = handler
+    }
 
     init(address: String) {
         self.address = address.replacingOccurrences(of: "-", with: ":")
@@ -851,13 +881,42 @@ final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate {
             let frame = receiveBuffer.subdata(in: 0..<frameLength)
             receiveBuffer = receiveBuffer.subdata(in: frameLength..<receiveBuffer.count)
             if let message = ProtocolCodec.decodeRemoteFrame(frame) {
+                if message.protocolID == 0x0d, let type = message.messageType, (161...168).contains(type) {
+                    if type == 163 || type == 164 {
+                        let prefix = type == 163 ? "realtime" : "cached"
+                        lifeLogAudioCounts[prefix + "Messages", default: 0] += 1
+                        lifeLogAudioCounts[prefix + "Bytes", default: 0] += message.audioData?.count ?? 0
+                        lifeLogLastAudioMetadata = message.json ?? [:]
+                        lifeLogLastAudioMetadata["receivedAt"] = message.receivedAt.timeIntervalSince1970
+                        if type == 163, let count = message.json?["frameCount"] as? Int {
+                            let frames = max(0, min(31, count, (message.audioData?.count ?? 0) / 240))
+                            lifeLogAudioCounts["realtimeFrames", default: 0] += frames
+                            for key in ["vpuMask", "vadMask"] {
+                                if let mask = (message.json?[key] as? NSNumber)?.uint64Value {
+                                    for index in 0..<frames where mask & (1 << index) != 0 {
+                                        lifeLogAudioCounts[key + "Frames", default: 0] += 1
+                                    }
+                                }
+                            }
+                        }
+                        // The wake experiment counts audio; it does not retain packet payloads.
+                        continue
+                    }
+                    lifeLogEvents.append(["type": type, "receivedAt": message.receivedAt.timeIntervalSince1970,
+                                          "body": message.json as Any? ?? NSNull()])
+                    if lifeLogEvents.count > 128 { lifeLogEvents.removeFirst() }
+                    if type == 161 || type == 165 { lifeLogWakeHandler?(message) }
+                }
                 if [0x13, 0x17].contains(message.protocolID), message.messageType == 4 {
-                    droppedDisplayAudioPackets += 1
+                    if let audioHandler { audioHandler(message) }
+                    else { droppedDisplayAudioPackets += 1 }
                     continue
                 }
                 remoteMessages.append(message)
                 if remoteMessages.count > 256 { remoteMessages.removeFirst(remoteMessages.count - 256) }
-                if [0x13, 0x16, 0x17].contains(message.protocolID) {
+                if [0x13, 0x16, 0x17].contains(message.protocolID) ||
+                    (message.protocolID == 0x0f && message.messageType == 19 &&
+                     ["dashboard_config", "current_weather_update", "weather_update"].contains(message.json?["cmd"] as? String ?? "")) {
                     recentDisplayMessages.append([
                         "protocol": Int(message.protocolID), "type": message.messageType as Any? ?? NSNull(),
                         "sequence": Int(message.sequence), "receivedAt": message.receivedAt.timeIntervalSince1970,
@@ -874,6 +933,7 @@ final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate {
 private final class BridgeController {
     private let transport: RFCOMMTransport
     let displays: DisplayController
+    let speech: SpeechController
     private let operationLock: NSRecursiveLock
     private var nextSequence: UInt16 = 0
     private var activeDocumentID: String?
@@ -884,7 +944,9 @@ private final class BridgeController {
         let operationLock = NSRecursiveLock()
         self.operationLock = operationLock
         self.transport = transport
-        displays = DisplayController(transport: transport, lock: operationLock)
+        let displays = DisplayController(transport: transport, lock: operationLock)
+        self.displays = displays
+        speech = SpeechController(transport: transport, displays: displays)
     }
 
     var isConnected: Bool { transport.isConnected }
@@ -1170,7 +1232,7 @@ private final class LocalHTTPServer {
             let request = try readRequest(clientFD)
             let (status, response) = route(request)
             let body = (try? JSONSerialization.data(withJSONObject: response, options: [.sortedKeys])) ?? Data("{}".utf8)
-            let reason = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 400 ? "Bad Request" : status == 401 ? "Unauthorized" : status == 404 ? "Not Found" : status == 409 ? "Conflict" : status == 413 ? "Payload Too Large" : status == 503 ? "Service Unavailable" : status == 504 ? "Gateway Timeout" : "Internal Server Error"
+            let reason = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 400 ? "Bad Request" : status == 401 ? "Unauthorized" : status == 403 ? "Forbidden" : status == 404 ? "Not Found" : status == 409 ? "Conflict" : status == 413 ? "Payload Too Large" : status == 503 ? "Service Unavailable" : status == 504 ? "Gateway Timeout" : "Internal Server Error"
             var headers = Data("HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: \(body.count)\r\n\r\n".utf8)
             headers.append(body)
             headers.withUnsafeBytes { rawBuffer in
@@ -1196,6 +1258,12 @@ private final class LocalHTTPServer {
         }
         do {
             let object = request.body.isEmpty ? [:] : (try JSONSerialization.jsonObject(with: request.body) as? [String: Any] ?? [:])
+            if let response = try controller.speech.route(method: request.method, path: request.path, body: object) {
+                return response
+            }
+            if request.method == "POST", request.path.hasPrefix("/v1/teleprompter"), controller.displays.isSpeechReserved {
+                throw BridgeError(status: 409, message: "Stop the audio session before using the teleprompter")
+            }
             if let response = try controller.displays.route(method: request.method, path: request.path, body: object) {
                 return response
             }

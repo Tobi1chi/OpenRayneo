@@ -14,5 +14,7 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>OpenRayneo Bridge connects to RayNeo iO glasses to send notifications and teleprompter text.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>OpenRayneo transcribes audio from your glasses on this Mac and displays the text on the glasses.</string>
 </dict>
 </plist>

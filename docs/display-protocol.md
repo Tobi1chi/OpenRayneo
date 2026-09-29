@@ -2,6 +2,8 @@
 
 This work uses the official RayNeo AI 1.0.5 Android APK, an official-app HCI capture, and direct tests of OpenRayneo. It does not incorporate third-party client code. These interfaces are experimental and use the existing firmware's pages.
 
+See [schedule and weather transport](schedule-weather-protocol.md) for calendar research and the experimental dashboard/weather APIs. Schedule writes are not yet exposed by the bridge.
+
 ## Business channels
 
 The APK's `P3.EnumC0848h` assigns these IDs:
@@ -64,7 +66,7 @@ An official-app capture established type `1` as the startup request:
 
 The glasses returned type `2`, the matching SID, `code: 1`, and `final_settings`. Direct Mac tests confirmed both the Chinese source text and answer displayed; a second final text update replaced the previous pair. Type `3` with `sid`, `reason_code: 2`, and empty `text` exited the page, after which the user opened the todo page. Caption type `7` is not a working startup on this channel.
 
-Starting this page also activates the glasses' audio uplink (type `4`), even with `save_audio: false`. OpenRayneo discards those packets, retaining only a count. This implementation does not record, transcribe, or forward audio. Always stop the prompt session after use.
+Starting this page also activates the glasses' audio uplink (type `4`), even with `save_audio: false`. OpenRayneo normally discards those packets, retaining only a count. An explicit [ASR session](asr.md) instead decodes them and performs on-device recognition on the Mac; an explicit [recording session](recording.md) saves a WAV locally. The bridge does not forward audio to a speech cloud service. Always stop the audio session after use. The protocol's `save_audio` field does not prevent a receiver from explicitly saving incoming packets locally.
 
 ## Task query
 
