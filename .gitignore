@@ -17,6 +17,7 @@ btsnoop*
 *.pcapng
 bugreport*.zip
 captures/
+recordings/
 analysis/
 
 # Runtime logs and macOS metadata

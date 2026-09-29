@@ -2,11 +2,11 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**Send notifications and teleprompter text to RayNeo iO glasses from your Mac.**
+**Send notifications, scripts, live text, and todos to RayNeo iO glasses from your Mac.**
 
 OpenRayneo is an unofficial, experimental Bluetooth bridge with a local HTTP API. Use it from shell scripts, desktop apps, or local automation. The bridge connects directly to the glasses; it does not require a phone relay, cloud service, or a modified official app.
 
-It uses the glasses' existing notification and teleprompter interfaces. Arbitrary graphics, screen mirroring, and custom display layouts are outside the current scope.
+It uses the glasses' existing notification, teleprompter, caption, prompt, and todo interfaces. Arbitrary graphics, screen mirroring, and custom display layouts are outside the current scope.
 
 ## What works
 
@@ -18,6 +18,14 @@ Verified on one RayNeo iO with an Apple Silicon Mac running macOS 15.6.1:
 | Custom notifications | Chinese title and body visibly confirmed |
 | Chinese teleprompter text | Short script and 120-line, 16,319-byte script displayed |
 | Playback controls | Pause, resume, and stop visibly confirmed |
+| Real-time captions | Two-line Chinese text displayed and replaced without noticeable loading |
+| Real-time prompts | Chinese question and answer displayed; updates replaced the previous pair |
+| Todos | New item visibly confirmed alongside an existing item; test removal confirmed by readback |
+| Weather cards | Custom labels, negative temperatures, description, range, night icon, and ordered hourly entries visibly confirmed |
+| Glasses microphone ASR | Chinese speech recognized on the Mac and visibly updated in the glasses' prompt-page body |
+| Local WAV recording | Continuous stereo recording finalized and played back; two different channel signals confirmed |
+| Microphone channel mapping | Owner's experiment: channel 1 bone-conduction/wearer, channel 2 forward-facing/other speakers |
+| LifeLog wake diagnostics | Direct Mac enable/wake/audio flow; wearer and external speech triggered wake in controlled trials |
 | Larger writes | Segmented to the negotiated RFCOMM MTU |
 | Connection diagnostics | Inspect connection state and retry through HTTP |
 
@@ -30,7 +38,7 @@ The glasses' firmware version was not recorded. Compatibility with other firmwar
 - Xcode Command Line Tools or Xcode with Swift 5.10 or later. Development was tested with Swift 6.1.2.
 - Bluetooth permission for the bridge or the application launching it, as requested by macOS.
 
-The Swift package uses Apple's system frameworks and has no external package dependencies. The official Android APK and Bluetooth captures are not needed to build or run it.
+The Swift package uses Apple's system frameworks and has no external Swift package dependencies. Optional glasses-microphone ASR additionally requires `libopus` and on-device speech recognition assets; see [ASR setup](docs/asr.md). The official Android APK and Bluetooth captures are not needed to build or run it.
 
 ## Quick start
 
@@ -101,6 +109,22 @@ All endpoints except `GET /health` require `Authorization: Bearer <token>`.
 | `POST` | `/v1/teleprompter/pause` | Pause the active script |
 | `POST` | `/v1/teleprompter/resume` | Resume the active script |
 | `POST` | `/v1/teleprompter/stop` | Stop the active script |
+| `POST` | `/v1/captions/start`, `/text`, `/stop` | Start, update, or exit live captions |
+| `POST` | `/v1/prompts/start`, `/text`, `/stop` | Start, update, or exit real-time prompts |
+| `GET` | `/v1/todos` | Read the complete task snapshot |
+| `POST` | `/v1/todos` | Add a todo while preserving existing records; requires `title` |
+| `DELETE` | `/v1/todos/{id}` | Remove a todo created by this bridge process |
+| `GET` | `/v1/display/events` | Recent display replies and discarded audio packet count |
+| `GET` | `/v1/dashboard` | Read dashboard configuration, including configured weather city IDs |
+| `POST` | `/v1/weather/current` | Set current-location weather; requires `location`, `temp`, and `icon` |
+| `POST` | `/v1/weather/cities` | Set city weather data from a nonempty `cities` array |
+| `POST` | `/v1/asr/authorize` | Request macOS speech recognition permission |
+| `POST` | `/v1/asr/start`, `/stop` | Start or stop glasses-microphone ASR with local recognition |
+| `GET` | `/v1/asr` | Audio statistics, current transcript, display writes, and errors |
+| `POST` | `/v1/recording/start`, `/stop` | Start or stop one continuous stereo WAV recording |
+| `GET` | `/v1/recording` | Recording path, duration, finalization state, and audio statistics |
+| `POST` | `/v1/lifelog/observe`, `/switch`, `/record`, `/stop` | Experimental LifeLog observation, enablement, audio request, and cleanup |
+| `GET` | `/v1/lifelog` | Bounded wake/exit events and audio/VPU/VAD counters |
 
 ### Teleprompter
 
@@ -130,9 +154,38 @@ curl -X POST http://127.0.0.1:8765/v1/teleprompter/stop \
   -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
 ```
 
+### Captions, prompts, and todos
+
+```sh
+curl -X POST http://127.0.0.1:8765/v1/captions/start \
+  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
+curl -X POST http://127.0.0.1:8765/v1/captions/text \
+  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Live captions\nUpdated by your local app."}'
+curl -X POST http://127.0.0.1:8765/v1/captions/stop \
+  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
+```
+
+Check `accepted: true` in the start response before sending text. Replace `captions` with `prompts` to use the prompt page; its text body can include `translation` for an answer and `final: true`. Stop each session when finished. Prompt startup activates the glasses' audio uplink; the bridge discards it unless an explicit ASR session is active.
+
+Todo creation accepts `{"title":"Prepare notes","important":false}` and returns `eventID` and `readBack`. It uses a full-list read/merge/sync, so keep the official phone app disconnected during writes. Open the glasses' todo menu manually. Deletion is limited to IDs created by the running bridge; a restart loses this ownership state. See [display protocol and API details](docs/display-protocol.md) for tested behavior and limitations.
+
+Experimental weather endpoints accept caller-supplied values; they do not fetch forecasts. Read `/v1/dashboard` for existing city IDs before updating city cards. Weather replies expose `acknowledged` and the raw device reply separately from visible rendering. See [weather formats and examples](docs/schedule-weather-protocol.md) for the current-location and city-card payloads. Test values remain until another update replaces them.
+
+### Glasses microphone ASR
+
+The experimental ASR path decodes glasses audio on the Mac, uses Apple's on-device speech recognizer, and displays the result on the real-time prompt page. It does not use the Mac microphone or upload audio. Install `opus`, launch the built app with `open` for correct macOS permission attribution, then authorize and start through the ASR endpoints. See [ASR setup and API](docs/asr.md) for exact commands, duration limits, and diagnostics.
+
+### Local WAV recording
+
+Use `/v1/recording/start` to record without ASR, or add `"record": true` to an ASR start request. Audio is appended to one 48 kHz, 16-bit stereo WAV, with a header checkpoint every second and finalization on stop. Files default to `~/Music/OpenRayneo/Recordings/`. See [recording setup, size limits, and channel findings](docs/recording.md).
+
 ### Response semantics
 
-- `200`: a read succeeded, or RFCOMM opened for `/v1/device/connect`. In `/health`, `ok: true` means the server is running; inspect `bleReady` and `rfcommConnected` separately.
+LifeLog diagnostics are separate from Proactive AI ASR/recording. They count audio without saving or transcribing it, and reserve the display/audio controls during observation. See [LifeLog protocol and test results](docs/lifelog-protocol.md) for the experimental API and wake behavior.
+
+- `200`: a read succeeded, RFCOMM opened for `/v1/device/connect`, or a display startup reply arrived (inspect `accepted`). In `/health`, `ok: true` means the server is running; inspect `bleReady` and `rfcommConnected` separately.
 - `202`: the display/control frames were written. Script startup also waits for a file-transfer acknowledgment. This does **not** confirm visible rendering or playback state.
 - Errors use `{"error":"..."}`. Common statuses include `400` for invalid input, `401` for a missing/wrong token, `409` when no script is active, `413` for oversized data, and `503`/`504` for connection or transfer failures.
 
@@ -145,6 +198,8 @@ Set these environment variables before launching the bridge:
 | `OPENRAYNEO_API_TOKEN` | Generated at startup | Bearer token; printed in startup output |
 | `OPENRAYNEO_PORT` | `8765` | Local HTTP port |
 | `RAYNEO_ADDRESS` | Auto-select one paired iO | Classic Bluetooth address when selection is ambiguous |
+| `OPENRAYNEO_RECORDINGS_DIR` | `~/Music/OpenRayneo/Recordings/` | Directory for explicitly requested WAV recordings |
+| `OPENRAYNEO_OPUS_LIBRARY` | Standard Homebrew paths | Optional explicit libopus dylib path for ASR |
 | `OPENRAYNEO_BLE_TRACE` | Off | Set to `1` to log nearby advertisement names, services, connectability, and RSSI |
 
 The server binds to `127.0.0.1` only and is intended for local integrations. Treat the startup token as a credential, and redact it before sharing logs. BLE tracing can include names of nearby devices.
@@ -157,7 +212,9 @@ The server binds to `127.0.0.1` only and is intended for local integrations. Tre
 
 **A connection attempt fails:** inspect `GET /v1/device`, then retry `POST /v1/device/connect`. A BLE attempt has a 15-second timeout and cleans up its scan/pending connection. RFCOMM opening has a further 12-second wait.
 
-**A control request returns `409`:** start a new script through this bridge process. Active script state is not recovered after a restart or after `stop`.
+**RFCOMM times out after switching from the phone:** if macOS logs report `BT_ERROR_INVALID_LINK_KEY`, stop the bridge, forget the glasses in Mac Bluetooth settings, put them in pairing mode, and pair again. This recovered the data channel during testing; unbinding the official phone account was not required.
+
+**A control request returns `409`:** start a new script through this bridge process. Active script state is not recovered after a restart or after `stop`. Caption/prompt text requires an accepted session; stop that session before retrying a failed start.
 
 ## Current limits
 
