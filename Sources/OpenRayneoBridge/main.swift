@@ -7,20 +7,22 @@ import Darwin
 import Foundation
 import IOBluetooth
 
-private struct BridgeError: Error {
+struct BridgeError: Error {
     let status: Int
     let message: String
 }
 
-private struct RemoteMessage {
+struct RemoteMessage {
     let protocolID: UInt8
+    let sequence: UInt16
+    let receivedAt: Date
     let protobuf: Data
     let action: UInt64?
     let messageType: UInt64?
     let json: [String: Any]?
 }
 
-private enum ProtocolCodec {
+enum ProtocolCodec {
     static func varint(_ value: UInt64) -> Data {
         var value = value
         var result = Data()
@@ -67,6 +69,13 @@ private enum ProtocolCodec {
         protobuf.append(field(3, bytes: try jsonData(body)))
         protobuf.append(field(4, bytes: Data()))
         return try frame(protocolID: 0x15, sequence: sequence, protobuf: protobuf)
+    }
+
+    static func displayFrame(protocolID: UInt8, sequence: UInt16, type: UInt64, body: [String: Any]) throws -> Data {
+        var protobuf = field(1, varint: 1)
+        protobuf.append(field(2, varint: type))
+        protobuf.append(field(3, bytes: try jsonData(body)))
+        return try frame(protocolID: protocolID, sequence: sequence, protobuf: protobuf)
     }
 
     static func fileTransferFrame(protobuf: Data) throws -> Data {
@@ -203,7 +212,7 @@ private enum ProtocolCodec {
         let messageType = parsed.first(where: { $0.0 == 2 && $0.1 == 0 })?.2
         let jsonData = parsed.first(where: { $0.0 == 3 && $0.1 == 2 })?.3
         let json = jsonData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-        return RemoteMessage(protocolID: protocolID, protobuf: protobuf, action: action, messageType: messageType, json: json)
+        return RemoteMessage(protocolID: protocolID, sequence: UInt16(body[0]) << 8 | UInt16(body[1]), receivedAt: Date(), protobuf: protobuf, action: action, messageType: messageType, json: json)
     }
 
     static func firstFieldNumber(_ protobuf: Data) -> UInt64? {
@@ -652,7 +661,7 @@ private final class BLEReadinessSession: NSObject, CBCentralManagerDelegate, CBP
     }
 }
 
-private final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate {
+final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate {
     private let address: String
     private let bleReadiness: BLEReadinessSession
     private let writeLock = NSLock()
@@ -676,6 +685,8 @@ private final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate 
     private var channelOpenResult: IOReturn?
     private var receiveBuffer = Data()
     private var remoteMessages: [RemoteMessage] = []
+    private var recentDisplayMessages: [[String: Any]] = []
+    private var droppedDisplayAudioPackets = 0
 
     init(address: String) {
         self.address = address.replacingOccurrences(of: "-", with: ":")
@@ -691,6 +702,18 @@ private final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate 
 
     var diagnostics: [String: Any] {
         ["ble": bleReadiness.diagnostics, "rfcommConnected": isConnected]
+    }
+
+    var displayEvents: [[String: Any]] {
+        receiveCondition.lock()
+        defer { receiveCondition.unlock() }
+        return recentDisplayMessages
+    }
+
+    var displayAudioPacketCount: Int {
+        receiveCondition.lock()
+        defer { receiveCondition.unlock() }
+        return droppedDisplayAudioPackets
     }
 
     func ensureConnected() throws {
@@ -815,7 +838,7 @@ private final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate 
         let magic = Data([0xaa, 0x55])
         while receiveBuffer.count >= 4 {
             guard let start = receiveBuffer.range(of: magic) else {
-                receiveBuffer = receiveBuffer.suffix(1)
+                receiveBuffer = Data(receiveBuffer.suffix(1))
                 return
             }
             if start.lowerBound > receiveBuffer.startIndex {
@@ -828,7 +851,21 @@ private final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate 
             let frame = receiveBuffer.subdata(in: 0..<frameLength)
             receiveBuffer = receiveBuffer.subdata(in: frameLength..<receiveBuffer.count)
             if let message = ProtocolCodec.decodeRemoteFrame(frame) {
+                if [0x13, 0x17].contains(message.protocolID), message.messageType == 4 {
+                    droppedDisplayAudioPackets += 1
+                    continue
+                }
                 remoteMessages.append(message)
+                if remoteMessages.count > 256 { remoteMessages.removeFirst(remoteMessages.count - 256) }
+                if [0x13, 0x16, 0x17].contains(message.protocolID) {
+                    recentDisplayMessages.append([
+                        "protocol": Int(message.protocolID), "type": message.messageType as Any? ?? NSNull(),
+                        "sequence": Int(message.sequence), "receivedAt": message.receivedAt.timeIntervalSince1970,
+                        "body": message.json as Any? ?? NSNull()
+                    ])
+                    if recentDisplayMessages.count > 64 { recentDisplayMessages.removeFirst() }
+                    trace("Display message protocol=\(message.protocolID) type=\(message.messageType ?? 0)")
+                }
             }
         }
     }
@@ -836,13 +873,18 @@ private final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate 
 
 private final class BridgeController {
     private let transport: RFCOMMTransport
-    private let operationLock = NSRecursiveLock()
+    let displays: DisplayController
+    private let operationLock: NSRecursiveLock
     private var nextSequence: UInt16 = 0
     private var activeDocumentID: String?
     private var customScriptCount = 0
 
     init(address: String) {
-        transport = RFCOMMTransport(address: address)
+        let transport = RFCOMMTransport(address: address)
+        let operationLock = NSRecursiveLock()
+        self.operationLock = operationLock
+        self.transport = transport
+        displays = DisplayController(transport: transport, lock: operationLock)
     }
 
     var isConnected: Bool { transport.isConnected }
@@ -1154,6 +1196,9 @@ private final class LocalHTTPServer {
         }
         do {
             let object = request.body.isEmpty ? [:] : (try JSONSerialization.jsonObject(with: request.body) as? [String: Any] ?? [:])
+            if let response = try controller.displays.route(method: request.method, path: request.path, body: object) {
+                return response
+            }
             switch (request.method, request.path) {
             case ("POST", "/v1/device/connect"):
                 try controller.connect()
