@@ -4,7 +4,7 @@
 
 **Send notifications, scripts, live text, and todos to RayNeo iO glasses from your Mac.**
 
-OpenRayneo is an unofficial, experimental Bluetooth bridge with a local HTTP API. Use it from shell scripts, desktop apps, or local automation. The bridge connects directly to the glasses; it does not require a phone relay, cloud service, or a modified official app.
+OpenRayneo is an unofficial, experimental Mac app and Bluetooth bridge with a local HTTP API. Use the desktop control panel, shell scripts, or local automation. The bridge connects directly to the glasses; it does not require a phone relay, cloud service, or a modified official app.
 
 It uses the glasses' existing notification, teleprompter, caption, prompt, and todo interfaces. Arbitrary graphics, screen mirroring, and custom display layouts are outside the current scope.
 
@@ -27,6 +27,7 @@ Verified on one RayNeo iO with an Apple Silicon Mac running macOS 15.6.1:
 | Chinese teleprompter text | Short script and 120-line, 16,319-byte script displayed |
 | Playback controls | Pause, resume, and stop visibly confirmed |
 | Real-time captions | Two-line Chinese text displayed and replaced without noticeable loading |
+| Text-grid display | 26×7 full-width character grid with blank-cell padding; 5–10 updates/s selected for daily use |
 | Real-time prompts | Chinese question and answer displayed; updates replaced the previous pair |
 | Todos | New item visibly confirmed alongside an existing item; test removal confirmed by readback |
 | Weather cards | Custom labels, negative temperatures, description, range, night icon, and ordered hourly entries visibly confirmed |
@@ -48,6 +49,14 @@ The glasses' firmware version was not recorded. Compatibility with other firmwar
 
 The Swift package uses Apple's system frameworks and has no external Swift package dependencies. Optional glasses-microphone ASR additionally requires `libopus` and on-device speech recognition assets; see [ASR setup](docs/asr.md). The official Android APK and Bluetooth captures are not needed to build or run it.
 
+## macOS download
+
+Download the Apple Silicon (arm64) ZIP from [GitHub Releases](https://github.com/Tobi1chi/OpenRayneo/releases). Unzip it and move `OpenRayneoBridge.app` to Applications, then open its **设备与 API** page. New devices can use **添加并配对眼镜**; already paired devices can connect directly. The download does not require Xcode.
+
+The first release is experimental, ad-hoc signed, and not Apple-notarized. macOS Gatekeeper may block its first launch; use the system's per-app approval if you choose to run it. macOS 13+ is the deployment target; device testing used macOS 15.6.1 on Apple Silicon. No Intel binary is included. Optional ASR/WAV recording requires a local `libopus` installation (`brew install opus`); ASR also needs Apple's local language assets and Speech Recognition permission. The ZIP contains no videos, recordings, or credentials.
+
+For source builds and headless use, follow the steps below. To create a release ZIP from source, see [release packaging](docs/releases.md).
+
 ## Quick start
 
 ### 1. Build
@@ -66,17 +75,45 @@ cd OpenRayneo
 sh scripts/build-app.sh
 ```
 
-This creates `OpenRayneoBridge.app` with the Bluetooth usage description required by macOS. It is a locally built command-line app bundle, not a notarized GUI installer.
+This creates `OpenRayneoBridge.app`, a native macOS control panel with the required privacy descriptions. The build uses an available development certificate to preserve macOS permissions across rebuilds, falling back to ad-hoc signing when none is available. It is not notarized. See [signing and persistent permissions](docs/desktop-app.md#persistent-macos-permissions).
 
-### 2. Pair and start
+### 2. Pair from the command line
 
-Pair the glasses in **System Settings → Bluetooth** and complete any pairing confirmation yourself. For the first connection, keep the glasses near the Mac and temporarily turn off the phone's system Bluetooth if it normally connects to them.
+Use a known classic Bluetooth address; the glasses do not need to appear in the system's Nearby Devices search. Stop the Bridge and turn off phone Bluetooth first. The commands below remove only the target Mac bond before pairing. For a new device, enter glasses pairing mode; during recovery of the known glasses, preserve their current state. Ordinary reconnection does not require bond removal.
+
+```sh
+export RAYNEO_ADDRESS='AA-BB-CC-DD-EE-FF' # Replace with the glasses' actual address
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --unpair "$RAYNEO_ADDRESS"
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pairing-status "$RAYNEO_ADDRESS"
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pair "$RAYNEO_ADDRESS"
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pairing-status "$RAYNEO_ADDRESS"
+```
+
+Require pairing result `0` and an independent `isPaired: true`, then let the pairing command exit before starting the Bridge. The bundled command above is still under validation. The complete connection and visible notification confirmed on 2026-09-29 used the [separate Swift helper and recovery procedure](docs/protocol.md#verified-recovery-on-2026-09-29), which includes the runnable reference implementation.
+
+### 3. Open the control panel
+
+Double-click `OpenRayneoBridge.app`, or run:
+
+```sh
+open ./OpenRayneoBridge.app
+```
+
+The **设备与 API** (Device & API) page connects already paired glasses through **连接并启用 API** (Connect and enable API). Copy the address, token, or authenticated query command from this page. GUI recovery after replacing only the Mac bond has been verified, but initial pairing can still fail. See the [manual acceptance procedure](docs/desktop-app.md#manual-first-pair-acceptance).
+
+The other panels send the minimal navigation demo, captions/prompts, notifications, and teleprompter scripts, or start local ASR/WAV recording. Disconnecting or quitting stops the app-owned service. The navigation demo uses manual direction/distance values; it is not GPS navigation. See [desktop controls](docs/desktop-app.md).
+
+The experimental **字符视频** panel converts local movies into brightness-matched full-width characters, block, or half-block animations at 5–10 updates/s. See [the text-video guide](docs/text-video.md) for hardware validation limits.
+
+### 4. Headless mode and API examples
+
+After completing command-line pairing, keep the glasses awake and phone Bluetooth off, then start the API as a separate process.
 
 In the first terminal, run:
 
 ```sh
 export OPENRAYNEO_API_TOKEN="$(openssl rand -hex 24)"
-./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --headless
 ```
 
 Allow Bluetooth access if macOS asks. Keep this terminal running; press `Ctrl+C` to stop the bridge.
@@ -89,7 +126,7 @@ export OPENRAYNEO_API_TOKEN='paste-the-token-from-the-first-terminal'
 
 If several iO devices are paired, set `RAYNEO_ADDRESS` before starting the bridge to select the intended device.
 
-### 3. Connect and send a notification
+Connect and send a notification:
 
 ```sh
 curl -X POST http://127.0.0.1:8765/v1/device/connect \
@@ -181,6 +218,10 @@ Todo creation accepts `{"title":"Prepare notes","important":false}` and returns 
 
 Experimental weather endpoints accept caller-supplied values; they do not fetch forecasts. Read `/v1/dashboard` for existing city IDs before updating city cards. Weather replies expose `acknowledged` and the raw device reply separately from visible rendering. See [weather formats and examples](docs/schedule-weather-protocol.md) for the current-location and city-card payloads. Test values remain until another update replaces them.
 
+### Text grid
+
+For a text-based dashboard, the caption page supports a tested 26×7 grid using full-width characters and `U+3000` padding (`font_size: 1`, `content_width: 100`, `max_lines: 7`). A 20×6 grid also works at `font_size: 2`. Target 5–10 whole-panel updates/s for daily use; a 30 Hz constant-speed animation test also passed visually, but the physical refresh limit is unmeasured. See [text layout measurements, update rates, and frame construction](docs/text-layout.md). This does not expose ANSI terminal control or arbitrary graphics.
+
 ### Glasses microphone ASR
 
 The experimental ASR path decodes glasses audio on the Mac, uses Apple's on-device speech recognizer, and displays the result on the real-time prompt page. It does not use the Mac microphone or upload audio. Install `opus`, launch the built app with `open` for correct macOS permission attribution, then authorize and start through the ASR endpoints. See [ASR setup and API](docs/asr.md) for exact commands, duration limits, and diagnostics.
@@ -214,13 +255,13 @@ The server binds to `127.0.0.1` only and is intended for local integrations. Tre
 
 ## Troubleshooting
 
-**The bridge cannot select the glasses:** pair them in macOS first. If multiple iO devices are paired, set `RAYNEO_ADDRESS` to the desired device's address.
+**The bridge cannot select the glasses:** confirm a saved Mac bond using the command-line pairing instructions above. If multiple iO devices are paired, set `RAYNEO_ADDRESS` to the desired device's address.
 
 **BLE discovery times out:** keep the glasses awake and nearby, check their pairing/discovery mode, and temporarily disable the phone's system Bluetooth. Disconnecting only the phone app was not sufficient during testing. Check macOS Bluetooth permissions as well.
 
 **A connection attempt fails:** inspect `GET /v1/device`, then retry `POST /v1/device/connect`. A BLE attempt has a 15-second timeout and cleans up its scan/pending connection. RFCOMM opening has a further 12-second wait.
 
-**RFCOMM times out after switching from the phone:** if macOS logs report `BT_ERROR_INVALID_LINK_KEY`, stop the bridge, forget the glasses in Mac Bluetooth settings, put them in pairing mode, and pair again. This recovered the data channel during testing; unbinding the official phone account was not required.
+**RFCOMM times out after switching from the phone:** if macOS logs report `BT_ERROR_INVALID_LINK_KEY`, stop the Bridge and follow the [verified separate-helper recovery procedure](docs/protocol.md#verified-recovery-on-2026-09-29). Forgetting the Mac bond, pairing with the standalone helper, exiting it, and starting the Bridge restored the data channel without unbinding the official phone account. Re-entering glasses pairing mode restored BLE advertising in one trial but did not establish that the existing Mac bond remained usable. The same recovery has now been verified through the GUI; reliable first-attempt pairing remains unresolved.
 
 **A control request returns `409`:** start a new script through this bridge process. Active script state is not recovered after a restart or after `stop`. Caption/prompt text requires an accepted session; stop that session before retrying a failed start.
 

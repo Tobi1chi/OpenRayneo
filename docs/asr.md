@@ -15,10 +15,12 @@ Build the application and launch it through Launch Services so privacy requests 
 sh scripts/build-app.sh
 export OPENRAYNEO_API_TOKEN="$(openssl rand -hex 24)"
 open -n -g ./OpenRayneoBridge.app \
-  --env "OPENRAYNEO_API_TOKEN=$OPENRAYNEO_API_TOKEN"
+  --env "OPENRAYNEO_API_TOKEN=$OPENRAYNEO_API_TOKEN" --args --headless
 ```
 
-Use an unused port with `--env OPENRAYNEO_PORT=8766` if necessary. Stop an existing bridge before launching another on the same port. The build script applies a local ad-hoc signature to bind the app's privacy descriptions; this is not notarization or a Developer ID distribution signature. macOS may request permission again after rebuilding.
+Use an unused port with `--env OPENRAYNEO_PORT=8766` if necessary. Stop an existing bridge before launching another on the same port. The build script prefers an available signing certificate so macOS can retain privacy consent across rebuilds; see [persistent permissions](desktop-app.md#persistent-macos-permissions). Ad-hoc fallback builds may prompt again after rebuilding. Local builds are not notarized.
+
+Alternatively, double-click the app and use its **语音与录音** panel. The desktop app manages the background service, permission request, and API token. Starting speech recognition or recording still requires an explicit button press.
 
 Request permission once, then start recognition:
 

@@ -8,10 +8,14 @@
 	<string>com.openrayneo.bridge</string>
 	<key>CFBundleName</key>
 	<string>OpenRayneo Bridge</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>LSUIElement</key>
-	<true/>
+	<false/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>OpenRayneo Bridge connects to RayNeo iO glasses to send notifications and teleprompter text.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

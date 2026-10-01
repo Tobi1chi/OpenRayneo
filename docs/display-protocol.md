@@ -46,6 +46,10 @@ Type `5` updates text within that SID:
 
 A two-line Chinese caption was visibly confirmed, followed by a second two-line caption that replaced the first without noticeable loading. This was a text-only test; it did not implement ASR. Final/history accumulation semantics still need separate verification.
 
+Further [text layout experiments](text-layout.md) confirmed full-width character grids using `U+3000` spaces: 20×6 at font setting `2`, and 26×7 at setting `1`. The same note records measured wrap positions, whole-frame update tests, and the limits of treating this text page as a TUI surface.
+
+Later [navigation-grid tests](tui-navigation.md) found that `final: true` made complete frames appear together and replace the previous frame. A leading `U+3000` before the entire 20×5 frame corrected an observed first-row one-cell shift at font `2`; see the test conditions before applying this workaround.
+
 Type `3` requests exit using `sid`, `reason_code: 10`, and an empty `text`. The user confirmed the glasses returned to the home page after the test.
 
 ## Real-time prompts
@@ -100,7 +104,7 @@ This is experimental full-list synchronization, without concurrent-writer protec
 
 ## Local display API
 
-Use `POST /v1/captions/start`, `/text`, `/stop`, or the equivalent `/v1/prompts/` paths. Start accepts an empty object. Captions optionally accept `font_size`, `content_width`, and `max_lines`; only defaults `2`, `100`, and `5` were tested. Text requires a nonempty `text`, with optional `translation` and boolean `final` (default `false`). Prompt tests used `final: true`; partial/final history semantics are not established.
+Use `POST /v1/captions/start`, `/text`, `/stop`, or the equivalent `/v1/prompts/` paths. Start accepts an empty object. Captions optionally accept `font_size`, `content_width`, and `max_lines`; defaults are `2`, `100`, and `5`. The tested firmware also supports a 26×7 full-width grid at font `1`, width `100`, and 7 lines. Inspect `reply.effective_config`: requests for font `0`, width `120`, or excess lines were clamped in the [layout tests](text-layout.md). Text requires a nonempty `text`, with optional `translation` and boolean `final` (default `false`). Prompt tests used `final: true`; partial/final history semantics are not established.
 
 Only one caption or prompt session is tracked at a time. Inspect `accepted: true` on start before sending text. A timeout returns `acknowledged: false`, and text remains blocked; call the matching stop endpoint before retrying. Stop the active session before starting a teleprompter or another display mode. Sessions are not recovered after a bridge restart or an external device operation.
 

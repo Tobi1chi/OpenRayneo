@@ -4,7 +4,7 @@
 
 **从 Mac 向雷鸟 RayNeo iO 眼镜发送通知、提词稿、实时文字和待办。**
 
-OpenRayneo 是一个非官方、实验性的蓝牙 Bridge，提供本机 HTTP API，可供脚本、桌面应用和本地自动化调用。Bridge 直接连接眼镜，无需手机中转、云服务或修改官方 App。
+OpenRayneo 是一个非官方、实验性的 Mac 应用和蓝牙 Bridge，提供原生控制界面及本机 HTTP API，可供桌面操作、脚本和本地自动化使用。Bridge 直接连接眼镜，无需手机中转、云服务或修改官方 App。
 
 目前复用眼镜已有的通知、提词器、字幕、实时提示和待办界面，不提供任意图形绘制、屏幕镜像或自定义显示布局。
 
@@ -27,6 +27,7 @@ OpenRayneo 是一个非官方、实验性的蓝牙 Bridge，提供本机 HTTP AP
 | 中文提词稿 | 短稿和 120 行、16,319 字节的长稿正常显示 |
 | 播放控制 | 暂停、继续、退出均已目视确认 |
 | 实时字幕 | 两行中文正常显示，新文字直接替换，无明显加载 |
+| 字符网格显示 | 已目视验证 26×7 全角字符网格及空白占位；日用选定每秒更新 5–10 次 |
 | 实时提示 | 中文问题与回答正常显示，连续更新替换上一组 |
 | 待办 | 新条目与原有条目同时显示，测试条目删除已回读确认 |
 | 天气卡片 | 自定义名称、负温度、描述、温度范围、夜间图标及小时预报顺序均已目视确认 |
@@ -48,6 +49,14 @@ OpenRayneo 是一个非官方、实验性的蓝牙 Bridge，提供本机 HTTP AP
 
 项目使用 Apple 系统框架，没有第三方 Swift 包依赖。可选的眼镜麦克风 ASR 还需要 `libopus` 和系统本地语音识别资源，详见 [ASR 配置](docs/asr.md)。构建和运行均不需要官方 Android APK 或蓝牙抓包文件。
 
+## 下载 macOS 软件包
+
+从 [GitHub Releases](https://github.com/Tobi1chi/OpenRayneo/releases) 下载 Apple Silicon（arm64）ZIP，解压后把 `OpenRayneoBridge.app` 移到“应用程序”，打开 **设备与 API** 页面。新眼镜可选择 **添加并配对眼镜**；已配对设备直接连接。使用下载的软件包不需要 Xcode。
+
+首个版本为实验版，采用 ad-hoc 签名，未经过 Apple 公证。首次打开可能被 macOS Gatekeeper 拦截；决定运行时，可使用系统提供的单个应用批准入口。部署目标是 macOS 13+，真机实测为 Apple Silicon 上的 macOS 15.6.1，本次不提供 Intel 二进制。可选 ASR/WAV 录音需要本机安装 `libopus`（`brew install opus`）；ASR 还需要 Apple 本地语言资源和语音识别权限。ZIP 不包含视频、录音或凭据。
+
+源码构建与 headless 使用方式见下文。发布包的构建步骤见[发布打包说明](docs/releases.md)。
+
 ## 快速开始
 
 ### 1. 构建
@@ -66,17 +75,45 @@ cd OpenRayneo
 sh scripts/build-app.sh
 ```
 
-脚本生成 `OpenRayneoBridge.app`，其中包含 macOS 要求的蓝牙用途说明。这是本机构建的命令行应用包，不是经过公证的图形安装程序。
+脚本生成原生 Mac 控制应用 `OpenRayneoBridge.app`，包含所需的系统权限说明。构建会使用本机可用的开发证书签名，以保留重新构建后的系统授权；没有证书时退回临时签名。尚未经过 Apple 公证，详见[签名与持久授权](docs/desktop-app.md#persistent-macos-permissions)。
 
-### 2. 配对并启动
+### 2. 命令行配对
 
-在 **系统设置 → 蓝牙** 中将眼镜与 Mac 配对，并自行完成系统配对确认。首次连接时让眼镜靠近 Mac；若手机平时连接这副眼镜，建议暂时关闭手机的系统蓝牙。
+当前可复现的配对入口需要已知的经典蓝牙地址，不依赖系统“附近设备”搜索。先退出 Bridge 并关闭手机蓝牙；下面的命令会先清除目标眼镜在 Mac 上的配对。新设备需进入配对模式，修复已知眼镜时保持眼镜当前状态。日常重新连接无需清除配对。
+
+```sh
+export RAYNEO_ADDRESS='AA-BB-CC-DD-EE-FF' # 替换为眼镜的实际地址
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --unpair "$RAYNEO_ADDRESS"
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pairing-status "$RAYNEO_ADDRESS"
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pair "$RAYNEO_ADDRESS"
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pairing-status "$RAYNEO_ADDRESS"
+```
+
+确认配对结果为 `0`、独立查询为 `isPaired: true`，且配对命令已退出，再启动 Bridge。上面的封装命令仍在验证；2026-09-29 完整连接和通知显示成功使用的是[独立 Swift 配对脚本及恢复步骤](docs/protocol.md#verified-recovery-on-2026-09-29)，其中保留了可直接运行的原始流程。
+
+### 3. 打开控制界面
+
+双击 `OpenRayneoBridge.app`，或执行：
+
+```sh
+open ./OpenRayneoBridge.app
+```
+
+默认打开 **设备与 API** 页。已有配对可直接点击 **连接并启用 API**，页面可以复制实际地址、令牌和带鉴权的查询命令。界面已验证在失败后仅重建 Mac 配对的恢复流程；首次尝试仍可能失败，操作步骤见[桌面控制说明](docs/desktop-app.md#manual-first-pair-acceptance)。
+
+其他面板提供极简导航演示、字幕／实时提示、通知、提词器，以及本地 ASR／WAV 录音。断开或退出应用时会停止自己启动的服务。导航演示手动设置方向和距离，尚未接入 GPS。详细操作见[桌面控制界面](docs/desktop-app.md)。
+
+实验性的 **字符视频** 页面可将本地视频转成按亮度匹配的全角字符、方块或半格动画，以每秒 5–10 次更新发送。使用方式和真机验证范围见[字符视频说明](docs/text-video.md)。
+
+### 4. 无界面运行与 API 示例
+
+完成上面的命令行配对后，保持眼镜开机、手机蓝牙关闭，单独启动 API。
 
 在第一个终端中启动：
 
 ```sh
 export OPENRAYNEO_API_TOKEN="$(openssl rand -hex 24)"
-./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge
+./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --headless
 ```
 
 如系统询问，请允许蓝牙访问。保持该终端运行，按 `Ctrl+C` 停止服务。
@@ -89,7 +126,7 @@ export OPENRAYNEO_API_TOKEN='粘贴第一个终端显示的令牌'
 
 如果 Mac 配对了多副 iO，请在启动前设置 `RAYNEO_ADDRESS`，指定目标设备的经典蓝牙地址。
 
-### 3. 连接并发送通知
+连接并发送通知：
 
 ```sh
 curl -X POST http://127.0.0.1:8765/v1/device/connect \
@@ -181,6 +218,10 @@ curl -X POST http://127.0.0.1:8765/v1/captions/stop \
 
 实验性天气接口接受调用方提供的数据，不会自行获取预报。修改城市卡片前，可用 `/v1/dashboard` 读取现有城市 ID。响应中的 `acknowledged` 和原始回执不等于目视显示确认。当前位置和城市卡片的格式见[天气协议与示例](docs/schedule-weather-protocol.md)。测试值会保留到后续更新覆盖它们。
 
+### 字符网格
+
+实时字幕页已验证可用全角字符和 `U+3000` 空格构成 26×7 文本网格（`font_size: 1`、`content_width: 100`、`max_lines: 7`）；`font_size: 2` 下也已验证 20×6。日用采用每秒 5–10 次整屏更新；30 Hz 匀速动画也通过目视检查，但屏幕的物理刷新上限尚未测定。排版方式及刷新速率实测见[文字布局说明](docs/text-layout.md)。这不代表眼镜支持 ANSI 终端控制或任意图形绘制。
+
 ### 眼镜麦克风 ASR
 
 实验性 ASR 在 Mac 上解码眼镜音频，调用 Apple 本地语音识别，再将结果显示到眼镜的实时提示页面。不使用 Mac 麦克风，也不上传音频。需要安装 `opus`，通过 `open` 启动应用包以正确归属 macOS 权限，然后调用 ASR 授权和启动接口。[ASR 配置与 API](docs/asr.md) 包含启动命令、时长限制和诊断方法。
@@ -214,13 +255,13 @@ curl -X POST http://127.0.0.1:8765/v1/captions/stop \
 
 ## 常见问题
 
-**无法选择眼镜：**先在 macOS 中配对；如有多副 iO，设置 `RAYNEO_ADDRESS`。
+**无法选择眼镜：**先按上面的命令行配对说明确认 Mac 存在有效配对；如有多副 iO，设置 `RAYNEO_ADDRESS`。
 
 **BLE 扫描超时：**保持眼镜唤醒并靠近 Mac，检查其配对或可发现状态，暂时关闭手机的系统蓝牙。实测仅断开手机 App 有时不足以释放连接，同时也应检查 macOS 的蓝牙权限。
 
 **连接失败后重试：**先查看 `GET /v1/device`，再调用 `POST /v1/device/connect`。BLE 阶段等待 15 秒，超时后会清理扫描及待建立连接；RFCOMM 打开阶段另有 12 秒等待时间。
 
-**从手机切回后 RFCOMM 超时：**如果 macOS 日志出现 `BT_ERROR_INVALID_LINK_KEY`，停止 Bridge，在 Mac 蓝牙设置中忽略眼镜，让眼镜进入配对模式后重新配对。本次实测这样恢复了数据通道，无需在官方手机 App 中解绑账户。
+**从手机切回后 RFCOMM 超时：**如果 macOS 日志出现 `BT_ERROR_INVALID_LINK_KEY`，停止 Bridge 并参考[已验证的独立配对恢复步骤](docs/protocol.md#verified-recovery-on-2026-09-29)。该流程通过清除 Mac 旧记录、独立脚本配对并退出、再启动 Bridge 恢复了数据通道；无需在官方手机 App 中解绑账户。重新进入眼镜配对模式曾恢复 BLE 广播，但不能据此保证原 Mac 配对仍可用；界面已验证上述恢复流程，首次尝试的可靠性仍待解决。
 
 **控制返回 `409`：**先通过当前 Bridge 进程启动稿件。进程重启或执行 `stop` 后，不会恢复原稿件的活动状态。字幕和提示文字要求已接受的会话；启动失败后需先调用对应 `stop` 再重试。
 
