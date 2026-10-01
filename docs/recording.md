@@ -19,7 +19,7 @@ curl -X POST http://127.0.0.1:8765/v1/recording/stop \
   -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
 ```
 
-The output is **48 kHz, 16-bit PCM, two-channel WAV** — the decoder's output format, not the hardware microphone sampling rate or the original Opus bandwidth. Saving WAV does not undo the glasses' Opus compression.
+The decoder outputs **48 kHz, 16-bit PCM, two-channel WAV**. The hardware microphone sampling rate and original Opus bandwidth have not been measured. Saving WAV preserves the decoded samples; it does not undo the glasses' Opus compression.
 
 The response's `recording` object provides `path`, `sampleRate`, `channels`, `bitsPerSample`, `bytes`, `seconds`, and `finalized`. After stop, verify `running: false`, `recording.finalized: true`, and `error: null`. Repeated stop requests are safe. ASR and recording share a single audio session; either stop endpoint stops that session, and another start returns `409` while it is active.
 
@@ -58,7 +58,7 @@ This mapping was confirmed on the tested RayNeo iO through the owner's experimen
 
 In a live 57.94-second test, all 2,897 received packets reported stereo. Roughly 92.8% of channel sample pairs differed and their zero-lag correlation was about 0.16, so the two channels carry different signals rather than duplicated mono. Whether they are raw microphone feeds, beamformed outputs, or other processed signals is unknown, and the examined protocol and APK paths expose no API to select additional physical microphone channels.
 
-`missingAudioPackets` counts forward gaps in audio `seq`; `droppedAudioPackets` counts the bounded processing queue's overflow; `decodeErrors` counts failed decoding attempts. The live test reported zero for all three, and the finalized file contained 2,781,120 stereo frames at 48 kHz, so that run was lossless. Other conditions need their own measurement.
+`missingAudioPackets` counts forward gaps in audio `seq`; `droppedAudioPackets` counts the bounded processing queue's overflow; `decodeErrors` counts failed decoding attempts. The live test reported zero for all three, and the finalized file contained 2,781,120 stereo frames at 48 kHz. No sequence gaps, queue overflows, or decoding failures were detected in that run.
 
 Only successfully received and decoded packets are appended. Silence from valid packets is retained. Disconnections, missing packets, and failed decodes are not reconstructed or padded, so a recording with losses can be shorter than elapsed wall-clock time. Audio before the session starts cannot be recovered.
 

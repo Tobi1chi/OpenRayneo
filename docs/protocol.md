@@ -125,7 +125,7 @@ SWIFT
 
 This reference helper handles the observed Just Works flow. It only reports PIN/numeric-comparison requests and does not answer them; process exit code alone is not its success criterion. The test did not change `pairValue=1`, perform an explicit SDP preflight, or add HFP waiting. The exact firmware reason for lost discoverability and the earlier RFCOMM rejection is unknown; neither helper construction nor `stop()` is isolated as the causal fix.
 
-The revised GUI reproduced the recovery with unchanged code and handshake: its first manual pairing completed classic pairing and BLE application authentication, but macOS then reported `BT_ERROR_INVALID_LINK_KEY` and RFCOMM timed out. After stopping its Bridge and replacing only the Mac bond without manually re-entering glasses pairing mode, the same GUI connected successfully. RFCOMM opened in approximately 46 ms with MTU 1011, and the wearer confirmed success. Classic pairing completion and BLE application authentication therefore do not confirm that the subsequent classic connection can authenticate with the saved bond. Whether the mismatch originates in glasses key handling, macOS state, or their interaction is unknown. Both the failed and successful attempts initially logged `pendingClassicSMP:1` and LE encryption status `4803`; these fields do not distinguish success from failure and are not the root cause.
+The revised GUI reproduced the recovery with unchanged code and handshake: its first manual pairing completed classic pairing and BLE application authentication, but macOS then reported `BT_ERROR_INVALID_LINK_KEY` and RFCOMM timed out. After stopping its Bridge and replacing only the Mac bond without manually re-entering glasses pairing mode, the same GUI connected successfully. RFCOMM opened in approximately 46 ms with MTU 1011, and the wearer confirmed success. Classic pairing completion and BLE application authentication therefore do not confirm that the subsequent classic connection can authenticate with the saved bond. Whether the mismatch originates in glasses key handling, macOS state, or their interaction is unknown. Both the failed and successful attempts initially logged `pendingClassicSMP:1` and LE encryption status `4803`; these fields do not distinguish success from failure or identify the root cause.
 
 The connection flow above starts after the Mac has a classic Bluetooth pairing with the selected glasses. The bridge checks the classic address advertised by the BLE pairing characteristic before authenticating a candidate device.
 
@@ -187,7 +187,7 @@ An observed pairing-state payload was:
 +----------- command 0x17 (decimal 23)
 ```
 
-Treating this status body as TLVs drops the message. The bridge exposes the first status byte in `/v1/device` as `ble.pairingState`. This is separate from `ble.ready`, which reflects successful application authentication; the pairing-state notification may not arrive on every reconnection, so poll `/v1/device` for the current value.
+Treating this status body as TLVs drops the message. The bridge exposes the first status byte in `/v1/device` as `ble.pairingState`. This is separate from `ble.ready`, which reflects successful application authentication; `ble.pairingState` contains the last received status, or null when none has arrived since the connection attempt began. Polling `/v1/device` reads this cached value; it does not request a fresh notification from the glasses.
 
 ## Notifications
 
@@ -213,7 +213,7 @@ Protobuf omits default zero values. In particular, an absent request offset mean
 
 Text transfer sizes and offsets use UTF-8 **bytes**. The teleprompter metadata's `total` uses UTF-16 code units. The file descriptor carries MD5, and the teleprompter completion metadata carries FNV-1a 32 over the UTF-8 content. These checksums are protocol requirements, not security guarantees.
 
-The bridge waits for requests and a successful file-transfer result matching the current task ID. Control responses report the script's control state; confirm visible playback on the glasses. Pause/resume/stop apply only to the active script recorded in the current process.
+The bridge waits for requests and a successful file-transfer result matching the current task ID. Pause/resume/stop responses confirm that the command was written; confirm playback state on the glasses. Pause/resume/stop apply only to the active script recorded in the current process.
 
 ## Validation boundaries
 
