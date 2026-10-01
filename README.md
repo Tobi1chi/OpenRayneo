@@ -10,13 +10,13 @@ It uses the glasses' existing notification, teleprompter, caption, prompt, and t
 
 ## ASCII-style character video
 
-Turn a local video into a tiny text animation on the glasses. In **字符视频**, choose a movie, select **全角灰度 26×7** (full-width grayscale), **方块** (blocks), or experimental half blocks, then play at **5 or 10 updates/s**. Playback is silent; inversion and contrast enhancement are optional. The app decodes video locally and replaces the complete caption frame, skipping late frames to avoid catch-up playback.
+Play a local video as a **26×7 character animation** on the glasses. Open the **Character Video** panel, choose a movie, and select **Full-width Grayscale**, **Blocks**, or experimental **Half Blocks**. Playback runs at **5 or 10 updates/s**, with optional inversion and contrast enhancement. The app decodes video locally, sends complete caption frames, and skips late frames to keep playback on time. Playback is silent.
 
 ![Bad Apple!! rendered as a 26×7 full-width character animation](docs/assets/bad-apple-character-preview.gif)
 
 *Bad Apple!! — an 8-second local render preview at 10 fps, using the app's decoder and full-width brightness mapping with inversion enabled. This is a software preview, not footage through the glasses. The source PV artwork belongs to its respective creators.*
 
-Each character represents the average brightness of a small image region. “ASCII-style” describes the appearance: the current grayscale mode uses **full-width Unicode characters and ideographic spaces** because the earlier half-width ASCII modes misaligned on the glasses. The wearer has confirmed that full-width grayscale displays and aligns correctly on the tested glasses. Use **检查字符对齐** when checking another device or firmware. The current renderer fills the grid and can distort the source aspect ratio. No video is bundled with the app.
+The grayscale renderer averages small image regions and maps their brightness to **full-width Unicode characters**, using ideographic spaces for blank cells. Full-width grayscale display and alignment have been confirmed on the tested glasses. **Check Character Alignment** sends a ruler for checking your device. The current renderer stretches the image to fill the grid. Choose your own video; the app ships without video files.
 
 See [the character-video guide](docs/text-video.md) for rendering details and tested limits.
 
@@ -63,7 +63,7 @@ The Swift package uses Apple's system frameworks and has no external Swift packa
 
 ## macOS download
 
-Download the Apple Silicon (arm64) ZIP from [GitHub Releases](https://github.com/Tobi1chi/OpenRayneo/releases). Unzip it and move `OpenRayneoBridge.app` to Applications, then open its **设备与 API** page. New devices can use **添加并配对眼镜**; already paired devices can connect directly. The download does not require Xcode.
+Download the Apple Silicon (arm64) ZIP from [GitHub Releases](https://github.com/Tobi1chi/OpenRayneo/releases). Unzip it and move `OpenRayneoBridge.app` to Applications, then open its **Device & API** page. New devices can use **Add and Pair Glasses**; already paired devices can connect directly. The download does not require Xcode.
 
 The first release is experimental, ad-hoc signed, and not Apple-notarized. macOS Gatekeeper may block its first launch; use the system's per-app approval if you choose to run it. macOS 13+ is the deployment target; device testing used macOS 15.6.1 on Apple Silicon. No Intel binary is included. Optional ASR/WAV recording requires a local `libopus` installation (`brew install opus`); ASR also needs Apple's local language assets and Speech Recognition permission. The ZIP contains no videos, recordings, or credentials.
 
@@ -105,17 +105,19 @@ Require pairing result `0` and an independent `isPaired: true`, then let the pai
 
 ### 3. Open the control panel
 
+Control names in this guide are English translations of the app’s Chinese labels.
+
 Double-click `OpenRayneoBridge.app`, or run:
 
 ```sh
 open ./OpenRayneoBridge.app
 ```
 
-The **设备与 API** (Device & API) page connects already paired glasses through **连接并启用 API** (Connect and enable API). Copy the address, token, or authenticated query command from this page. GUI recovery after replacing only the Mac bond has been verified, but initial pairing can still fail. See the [manual acceptance procedure](docs/desktop-app.md#manual-first-pair-acceptance).
+The **Device & API** page connects already paired glasses through **Connect and Enable API**. Copy the address, token, or authenticated query command from this page. GUI recovery after replacing only the Mac bond has been verified, but initial pairing can still fail. See the [manual acceptance procedure](docs/desktop-app.md#manual-first-pair-acceptance).
 
 The other panels send the minimal navigation demo, captions/prompts, notifications, and teleprompter scripts, or start local ASR/WAV recording. Disconnecting or quitting stops the app-owned service. The navigation demo uses manual direction/distance values; it is not GPS navigation. See [desktop controls](docs/desktop-app.md).
 
-The experimental **字符视频** panel converts local movies into brightness-matched full-width characters, block, or half-block animations at 5–10 updates/s. See [the text-video guide](docs/text-video.md) for hardware validation limits.
+The experimental **Character Video** panel converts local movies into brightness-matched full-width characters, block, or half-block animations at 5–10 updates/s. See [the text-video guide](docs/text-video.md) for hardware validation limits.
 
 ### 4. Headless mode and API examples
 
@@ -189,7 +191,7 @@ All endpoints except `GET /health` require `Authorization: Bearer <token>`.
 curl -X POST http://127.0.0.1:8765/v1/teleprompter \
   -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"title":"Demo","text":"Hello from OpenRayneo.\n你好，雷鸟眼镜。","speed":60}'
+  -d '{"title":"Demo","text":"Hello from OpenRayneo.\nYour script appears on the glasses.","speed":60}'
 ```
 
 `title` defaults to `OpenRayneo`; `speed` defaults to `120`. Speed values `60` and `120` were used during testing; the firmware's complete range and units have not been established. The current layout uses a three-second countdown.
