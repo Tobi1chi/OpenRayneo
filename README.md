@@ -16,7 +16,7 @@ Turn a local video into a tiny text animation on the glasses. In **字符视频*
 
 *Bad Apple!! — an 8-second local render preview at 10 fps, using the app's decoder and full-width brightness mapping with inversion enabled. This is a software preview, not footage through the glasses. The source PV artwork belongs to its respective creators.*
 
-Each character represents the average brightness of a small image region. “ASCII-style” describes the appearance: the current grayscale mode uses **full-width Unicode characters and ideographic spaces** because the earlier half-width ASCII modes misaligned on the glasses. Full-width grayscale alignment still needs device confirmation; use **检查字符对齐** before playback. The current renderer fills the grid and can distort the source aspect ratio. No video is bundled with the app.
+Each character represents the average brightness of a small image region. “ASCII-style” describes the appearance: the current grayscale mode uses **full-width Unicode characters and ideographic spaces** because the earlier half-width ASCII modes misaligned on the glasses. The wearer has confirmed that full-width grayscale displays and aligns correctly on the tested glasses. Use **检查字符对齐** when checking another device or firmware. The current renderer fills the grid and can distort the source aspect ratio. No video is bundled with the app.
 
 See [the character-video guide](docs/text-video.md) for rendering details and tested limits.
 
