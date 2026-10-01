@@ -2,7 +2,7 @@
 
 This work uses the official RayNeo AI 1.0.5 Android APK, an official-app HCI capture, and direct tests of OpenRayneo. It does not incorporate third-party client code. These interfaces are experimental and use the existing firmware's pages.
 
-See [schedule and weather transport](schedule-weather-protocol.md) for calendar research and the experimental dashboard/weather APIs. Schedule writes are not yet exposed by the bridge.
+See [schedule and weather transport](schedule-weather-protocol.md) for calendar research and the experimental dashboard/weather APIs. The bridge exposes dashboard and weather APIs but no schedule writes.
 
 ## Business channels
 
@@ -44,7 +44,7 @@ Type `5` updates text within that SID:
 }
 ```
 
-A two-line Chinese caption was visibly confirmed, followed by a second two-line caption that replaced the first without noticeable loading. This was a text-only test; it did not implement ASR. Final/history accumulation semantics still need separate verification.
+A two-line Chinese caption was visibly confirmed, followed by a second two-line caption that replaced the first without noticeable loading. This was a text-only test; it did not implement ASR. Final/history accumulation semantics need separate verification.
 
 Further [text layout experiments](text-layout.md) confirmed full-width character grids using `U+3000` spaces: 20×6 at font setting `2`, and 26×7 at setting `1`. The same note records measured wrap positions, whole-frame update tests, and the limits of treating this text page as a TUI surface.
 
@@ -70,7 +70,7 @@ An official-app capture established type `1` as the startup request:
 
 The glasses returned type `2`, the matching SID, `code: 1`, and `final_settings`. Direct Mac tests confirmed both the Chinese source text and answer displayed; a second final text update replaced the previous pair. Type `3` with `sid`, `reason_code: 2`, and empty `text` exited the page, after which the user opened the todo page. Caption type `7` is not a working startup on this channel.
 
-Starting this page also activates the glasses' audio uplink (type `4`), even with `save_audio: false`. OpenRayneo normally discards those packets, retaining only a count. An explicit [ASR session](asr.md) instead decodes them and performs on-device recognition on the Mac; an explicit [recording session](recording.md) saves a WAV locally. The bridge does not forward audio to a speech cloud service. Always stop the audio session after use. The protocol's `save_audio` field does not prevent a receiver from explicitly saving incoming packets locally.
+Starting this page also activates the glasses' audio uplink (type `4`), even with `save_audio: false`. OpenRayneo normally discards those packets, retaining only a count. An explicit [ASR session](asr.md) instead decodes them and performs on-device recognition on the Mac; an explicit [recording session](recording.md) saves a WAV locally. The bridge keeps audio local. Always stop the audio session after use. The protocol's `save_audio` field does not prevent a receiver from saving incoming packets locally.
 
 ## Task query
 
@@ -98,16 +98,16 @@ The official app sends type `6` with `total`, `isLastBatch: true`, and `eventLis
 
 Type `6` replaces the todo list. OpenRayneo queries the full list, preserves existing records, adds one item, sends the merged list, and queries again. A direct Mac test confirmed the new Chinese item appeared alongside the pre-existing item. Removing only the bridge-created item through another full sync was confirmed by readback, with the original record unchanged. Visual confirmation of removal was not requested.
 
-`POST /v1/todos` accepts `title` and optional boolean `important`. IDs are selected from unused integers in `90000..<100000`. `DELETE /v1/todos/{id}` only removes IDs created by the current bridge process; ownership is not recovered after restart. `readBack` reports whether the requested result was found in the subsequent query, not whether it rendered on screen. A readback timeout may occur after a write has already succeeded; query before retrying an add.
+`POST /v1/todos` accepts `title` and optional boolean `important`. IDs are selected from unused integers in `90000..<100000`. `DELETE /v1/todos/{id}` only removes IDs created by the current bridge process; ownership is not recovered after restart. `readBack` reports whether the requested result appeared in the subsequent query; it does not confirm on-screen rendering. A readback timeout may occur after a write has already succeeded; query before retrying an add.
 
 This is experimental full-list synchronization, without concurrent-writer protection or phone/cloud synchronization. Use it while the official phone app is disconnected. Schedule type `5`, completion updates, and automatic navigation into the todo page are not implemented. Open the todo menu on the glasses to view items.
 
 ## Local display API
 
-Use `POST /v1/captions/start`, `/text`, `/stop`, or the equivalent `/v1/prompts/` paths. Start accepts an empty object. Captions optionally accept `font_size`, `content_width`, and `max_lines`; defaults are `2`, `100`, and `5`. The tested firmware also supports a 26×7 full-width grid at font `1`, width `100`, and 7 lines. Inspect `reply.effective_config`: requests for font `0`, width `120`, or excess lines were clamped in the [layout tests](text-layout.md). Text requires a nonempty `text`, with optional `translation` and boolean `final` (default `false`). Prompt tests used `final: true`; partial/final history semantics are not established.
+Use `POST /v1/captions/start`, `/text`, `/stop`, or the equivalent `/v1/prompts/` paths. Start accepts an empty object. Captions optionally accept `font_size`, `content_width`, and `max_lines`; defaults are `2`, `100`, and `5`. The tested firmware also supports a 26×7 full-width grid at font `1`, width `100`, and 7 lines. Inspect `reply.effective_config`: requests for font `0`, width `120`, or excess lines were clamped in the [layout tests](text-layout.md). Text requires a nonempty `text`, with optional `translation` and boolean `final` (default `false`). Prompt tests used `final: true`; partial/final history semantics need separate tests.
 
 Only one caption or prompt session is tracked at a time. Inspect `accepted: true` on start before sending text. A timeout returns `acknowledged: false`, and text remains blocked; call the matching stop endpoint before retrying. Stop the active session before starting a teleprompter or another display mode. Sessions are not recovered after a bridge restart or an external device operation.
 
 ## Diagnostics
 
-`GET /v1/display/events` provides a bounded in-memory list of the latest 64 caption, prompt, and task replies, plus `discardedAudioPackets`. It requires the API bearer token. Reply bodies can contain displayed text or task content; they are not printed in normal transport logs. A successful write is not a visible-display acknowledgment.
+`GET /v1/display/events` provides a bounded in-memory list of the latest 64 caption, prompt, and task replies, plus `discardedAudioPackets`. It requires the API bearer token. Reply bodies can contain displayed text or task content; they are not printed in normal transport logs. A successful write confirms transmission, not visible display.

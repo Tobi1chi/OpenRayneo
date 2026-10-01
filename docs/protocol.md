@@ -1,6 +1,6 @@
 # Protocol notes
 
-These notes describe the subset implemented by OpenRayneo. They are based on inspection of RayNeo AI 1.0.5 and device traffic, followed by direct Mac-to-glasses tests. They are not an official specification or a compatibility guarantee. Official packages and raw captures are not included in this repository.
+These notes describe the subset implemented by OpenRayneo, based on inspection of RayNeo AI 1.0.5 and device traffic, followed by direct Mac-to-glasses tests. They are not an official specification. Official packages and raw captures are not included in this repository.
 
 ## Connection flow
 
@@ -33,7 +33,7 @@ The app executable now provides a direct-address pairing command and an independ
    ./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pairing-status "$RAYNEO_ADDRESS"
    ```
 
-   Require both `isPaired: false` and `isConnected: false`. `--unpair` removes only this device's Mac record through the runtime-checked native `remove` selector, which is not a public SDK API. Unsupported removal or incomplete cleanup stops the workflow; use macOS settings to forget the target if necessary. The pairing command refuses an already paired or connected target. This gate does not establish that the glasses or every internal macOS cache is at an initial state.
+   Require both `isPaired: false` and `isConnected: false`. `--unpair` removes only this device's Mac record through the runtime-checked native `remove` selector, which is not a public SDK API. Unsupported removal or incomplete cleanup stops the workflow; use macOS settings to forget the target if necessary. The pairing command refuses an already paired or connected target. The gate reflects the Mac's exposed state, not the glasses' or every internal macOS cache's state.
 3. Pair directly and let the command exit:
 
    ```sh
@@ -68,13 +68,13 @@ The app executable now provides a direct-address pairing command and an independ
 
 If the first BLE scan misses the glasses, preserve the bond and retry `/v1/device/connect`. Restarting the standalone Bridge triggers a fresh scan even when an earlier BLE session was ready. Freeze the pairing state and protocol settings while comparing results; do not simultaneously change the handshake, scan rules, and process model.
 
-On the development Mac, the bundled `--pair` command reproduced classic pairing and BLE authentication but did not complete its fresh-pair RFCOMM trial. The separate original Swift helper subsequently restored the complete connection and a visibly confirmed notification on 2026-09-29, as described below. Do not transfer that validation to the bundled CLI or GUI without testing their complete workflow.
+On the development Mac, the bundled `--pair` command reproduced classic pairing and BLE authentication but did not complete its fresh-pair RFCOMM trial. The separate original Swift helper subsequently restored the complete connection and a visibly confirmed notification on 2026-09-29, as described below. Do not assume the bundled CLI or GUI behaves the same without testing their complete workflow.
 
-The historical prompt/todo repair provides a second pairing reference: stop the Bridge, forget the stale macOS bond, then run a standalone Swift script using `IOBluetoothDevicePair(device: device)`, its delegate, and `pair.start()`. The script pumped the Foundation run loop until completion (up to 25 seconds), printed `device.isPaired()`, called `pair.stop()` even after success, and exited. A subsequent Bridge request completed BLE authentication and RFCOMM 26 with MTU 1011. The earlier bundled helper used `setDevice` and omitted `stop()` on success. The revised helper now follows the original construction, timeout, and cleanup; these differences were not established as the cause of the earlier failure. The GUI now launches it separately and verifies pairing in another process before starting the Bridge. The GUI recovery test is described below; reliable first-attempt pairing remains unresolved.
+The historical prompt/todo repair provides a second pairing reference: stop the Bridge, forget the stale macOS bond, then run a standalone Swift script using `IOBluetoothDevicePair(device: device)`, its delegate, and `pair.start()`. The script pumped the Foundation run loop until completion (up to 25 seconds), printed `device.isPaired()`, called `pair.stop()` even after success, and exited. A subsequent Bridge request completed BLE authentication and RFCOMM 26 with MTU 1011. The earlier bundled helper used `setDevice` and omitted `stop()` on success. The revised helper now follows the original construction, timeout, and cleanup; so far these differences do not explain the earlier failure. The GUI now launches it separately and verifies pairing in another process before starting the Bridge. The GUI recovery test is described below; first-attempt pairing remains unreliable.
 
-A replay of that original script on 2026-09-29 independently confirmed `isPaired: false` before pairing, completion `0`, and `isPaired: true` from a new process after the script exited. macOS also logged successful classic encryption. The standalone Bridge then missed the glasses in three BLE scans, including after the wearer woke the glasses. With the Bridge stopped, an independent 30-second scan received 257 advertisements from 12 devices but no RayNeo name, B81D service, matching manufacturer prefix, or known peripheral identifier; no B81D peripheral was already connected. This replay did **not** reach application authentication or RFCOMM. This discovery failure must not be reported as an RFCOMM or invalid-link-key result.
+A replay of that original script on 2026-09-29 independently confirmed `isPaired: false` before pairing, completion `0`, and `isPaired: true` from a new process after the script exited. macOS also logged successful classic encryption. The standalone Bridge then missed the glasses in three BLE scans, including after the wearer woke the glasses. With the Bridge stopped, an independent 30-second scan received 257 advertisements from 12 devices but no RayNeo name, B81D service, matching manufacturer prefix, or known peripheral identifier; no B81D peripheral was already connected. This replay did not reach application authentication or RFCOMM. This is a discovery failure, not an RFCOMM or invalid-link-key result.
 
-In a subsequent controlled check, the wearer exited and re-entered glasses pairing mode while preserving the Mac bond. A scan immediately found the RayNeo name and B81D; the next Bridge attempt authenticated BLE but failed to open RFCOMM. macOS logged RFCOMM failure `719` (`0x2cf`), while the Bridge reported its 12-second timeout. No `INVALID_LINK_KEY` entry was found for this attempt. This confirms that re-entering pairing mode restored discoverability in this instance, not that it is required after every failure or that the existing classic bond remains usable. The wearer observed a connecting animation during some failed attempts; successful BLE authentication and that animation are not full connection criteria.
+In a subsequent controlled check, the wearer exited and re-entered glasses pairing mode while preserving the Mac bond. A scan immediately found the RayNeo name and B81D; the next Bridge attempt authenticated BLE but failed to open RFCOMM. macOS logged RFCOMM failure `719` (`0x2cf`), while the Bridge reported its 12-second timeout. No `INVALID_LINK_KEY` entry was found for this attempt. This confirms that re-entering pairing mode restored discoverability in this instance; it does not mean it is required after every failure, and the existing classic bond still needs verification. The wearer observed a connecting animation during some failed attempts; successful BLE authentication and that animation do not prove a full connection.
 
 ### Verified recovery on 2026-09-29
 
@@ -123,9 +123,9 @@ pair.stop()
 SWIFT
 ```
 
-This reference helper handles the observed Just Works flow. It only reports PIN/numeric-comparison requests and does not answer them; process exit code alone is not its success criterion. The test did not change `pairValue=1`, perform an explicit SDP preflight, or add HFP waiting. The exact firmware reason for lost discoverability and the earlier RFCOMM rejection remains unproven; neither helper construction nor `stop()` has been isolated as the causal fix.
+This reference helper handles the observed Just Works flow. It only reports PIN/numeric-comparison requests and does not answer them; process exit code alone is not its success criterion. The test did not change `pairValue=1`, perform an explicit SDP preflight, or add HFP waiting. The exact firmware reason for lost discoverability and the earlier RFCOMM rejection is unknown; neither helper construction nor `stop()` is isolated as the causal fix.
 
-The revised GUI reproduced the recovery with unchanged code and handshake: its first manual pairing completed classic pairing and BLE application authentication, but macOS then reported `BT_ERROR_INVALID_LINK_KEY` and RFCOMM timed out. After stopping its Bridge and replacing only the Mac bond without manually re-entering glasses pairing mode, the same GUI connected successfully. RFCOMM opened in approximately 46 ms with MTU 1011, and the wearer confirmed success. Classic pairing completion and BLE application authentication therefore do not establish that the subsequent classic connection can authenticate with the saved bond. Whether the underlying mismatch originates in glasses key handling, macOS state, or their interaction remains unresolved. Both the failed and successful attempts initially logged `pendingClassicSMP:1` and LE encryption status `4803`; these fields alone do not distinguish success from failure and must not be treated as the root cause.
+The revised GUI reproduced the recovery with unchanged code and handshake: its first manual pairing completed classic pairing and BLE application authentication, but macOS then reported `BT_ERROR_INVALID_LINK_KEY` and RFCOMM timed out. After stopping its Bridge and replacing only the Mac bond without manually re-entering glasses pairing mode, the same GUI connected successfully. RFCOMM opened in approximately 46 ms with MTU 1011, and the wearer confirmed success. Classic pairing completion and BLE application authentication therefore do not confirm that the subsequent classic connection can authenticate with the saved bond. Whether the mismatch originates in glasses key handling, macOS state, or their interaction is unknown. Both the failed and successful attempts initially logged `pendingClassicSMP:1` and LE encryption status `4803`; these fields do not distinguish success from failure and are not the root cause.
 
 The connection flow above starts after the Mac has a classic Bluetooth pairing with the selected glasses. The bridge checks the classic address advertised by the BLE pairing characteristic before authenticating a candidate device.
 
@@ -142,7 +142,7 @@ The implemented application authentication uses a random challenge, device ident
 
 ### Pairing intent observation
 
-The successful bridge baseline sends device-info TLV `27` (`pairValue`) as `1`. The official APK distinguishes pairing (`1`) and ordinary Venus/iO reconnection (`2`), but changing this field has not been shown to fix the current connection failure. The verified bridge behavior is preserved; this distinction remains a research item, not a confirmed root cause or required migration.
+The successful bridge baseline sends device-info TLV `27` (`pairValue`) as `1`. The official APK distinguishes pairing (`1`) and ordinary Venus/iO reconnection (`2`), but changing this field has not been shown to fix the current connection failure. The verified bridge behavior is preserved; this distinction is a research item, not a confirmed root cause or required migration.
 
 ### HFP is not an application readiness requirement
 
@@ -187,7 +187,7 @@ An observed pairing-state payload was:
 +----------- command 0x17 (decimal 23)
 ```
 
-Treating this status body as TLVs drops the message. The bridge exposes the first status byte in `/v1/device` as `ble.pairingState`. This is separate from `ble.ready`, which reflects successful application authentication; the pairing-state notification is not guaranteed to arrive on every reconnection.
+Treating this status body as TLVs drops the message. The bridge exposes the first status byte in `/v1/device` as `ble.pairingState`. This is separate from `ble.ready`, which reflects successful application authentication; the pairing-state notification may not arrive on every reconnection, so poll `/v1/device` for the current value.
 
 ## Notifications
 
@@ -213,7 +213,7 @@ Protobuf omits default zero values. In particular, an absent request offset mean
 
 Text transfer sizes and offsets use UTF-8 **bytes**. The teleprompter metadata's `total` uses UTF-16 code units. The file descriptor carries MD5, and the teleprompter completion metadata carries FNV-1a 32 over the UTF-8 content. These checksums are protocol requirements, not security guarantees.
 
-The bridge waits for requests and a successful file-transfer result matching the current task ID. Teleprompter control responses are not a guarantee of actual display state. Pause/resume/stop apply only to the active script recorded in the current process.
+The bridge waits for requests and a successful file-transfer result matching the current task ID. Control responses report the script's control state; confirm visible playback on the glasses. Pause/resume/stop apply only to the active script recorded in the current process.
 
 ## Validation boundaries
 
@@ -225,6 +225,6 @@ Device tests confirmed:
 - A 120-line Chinese script (16,319 UTF-8 bytes), transferred through successive RFCOMM MTU-sized writes.
 - Visible pause, resume, and stop behavior.
 
-The long script was requested as one application-level file chunk. It validates transport segmentation, not a sequence of multiple file-chunk requests. Larger transfers, other firmware versions, and account-bound ECDH authentication remain unverified or unsupported as described in the README.
+The long script was requested as one application-level file chunk, which validates transport segmentation rather than a sequence of multiple file-chunk requests. Larger transfers, other firmware versions, and account-bound ECDH authentication are unverified or unsupported as described in the README.
 
 Local verification also covered replay of five intact captured pairing frames, file-transfer replay with omitted zero fields, CRC/malformed-TLV rejection, API authentication, malformed content length, oversized payload rejection, health reads during connection waits, BLE timeout cleanup, and retry. These were development checks; the current repository does not ship a persistent automated protocol test suite. GitHub Actions checks the build only.

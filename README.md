@@ -228,11 +228,11 @@ Check `accepted: true` in the start response before sending text. Replace `capti
 
 Todo creation accepts `{"title":"Prepare notes","important":false}` and returns `eventID` and `readBack`. It uses a full-list read/merge/sync, so keep the official phone app disconnected during writes. Open the glasses' todo menu manually. Deletion is limited to IDs created by the running bridge; a restart loses this ownership state. See [display protocol and API details](docs/display-protocol.md) for tested behavior and limitations.
 
-Experimental weather endpoints accept caller-supplied values; they do not fetch forecasts. Read `/v1/dashboard` for existing city IDs before updating city cards. Weather replies expose `acknowledged` and the raw device reply separately from visible rendering. See [weather formats and examples](docs/schedule-weather-protocol.md) for the current-location and city-card payloads. Test values remain until another update replaces them.
+Experimental weather endpoints accept caller-supplied values; they do not fetch forecasts. Read `/v1/dashboard` for existing city IDs before updating city cards. Weather replies expose `acknowledged` and the raw device reply; confirm visible rendering on the glasses. See [weather formats and examples](docs/schedule-weather-protocol.md) for the current-location and city-card payloads. Test values remain until another update replaces them.
 
 ### Text grid
 
-For a text-based dashboard, the caption page supports a tested 26×7 grid using full-width characters and `U+3000` padding (`font_size: 1`, `content_width: 100`, `max_lines: 7`). A 20×6 grid also works at `font_size: 2`. Target 5–10 whole-panel updates/s for daily use; a 30 Hz constant-speed animation test also passed visually, but the physical refresh limit is unmeasured. See [text layout measurements, update rates, and frame construction](docs/text-layout.md). This does not expose ANSI terminal control or arbitrary graphics.
+For a text-based dashboard, the caption page supports a tested 26×7 grid using full-width characters and `U+3000` padding (`font_size: 1`, `content_width: 100`, `max_lines: 7`). A 20×6 grid also works at `font_size: 2`. Target 5–10 whole-panel updates/s for daily use; a 30 Hz constant-speed animation test also passed visually, but the physical refresh limit is unmeasured. See [text layout measurements, update rates, and frame construction](docs/text-layout.md). The page takes plain text frames; ANSI terminal control and arbitrary graphics are outside its scope.
 
 ### Glasses microphone ASR
 
@@ -247,7 +247,7 @@ Use `/v1/recording/start` to record without ASR, or add `"record": true` to an A
 LifeLog diagnostics are separate from Proactive AI ASR/recording. They count audio without saving or transcribing it, and reserve the display/audio controls during observation. See [LifeLog protocol and test results](docs/lifelog-protocol.md) for the experimental API and wake behavior.
 
 - `200`: a read succeeded, RFCOMM opened for `/v1/device/connect`, or a display startup reply arrived (inspect `accepted`). In `/health`, `ok: true` means the server is running; inspect `bleReady` and `rfcommConnected` separately.
-- `202`: the display/control frames were written. Script startup also waits for a file-transfer acknowledgment. This does **not** confirm visible rendering or playback state.
+- `202`: the display/control frames were written. Script startup also waits for a file-transfer acknowledgment. Confirm visible rendering or playback state on the glasses.
 - Errors use `{"error":"..."}`. Common statuses include `400` for invalid input, `401` for a missing/wrong token, `409` when no script is active, `413` for oversized data, and `503`/`504` for connection or transfer failures.
 
 ## Configuration
@@ -273,7 +273,7 @@ The server binds to `127.0.0.1` only and is intended for local integrations. Tre
 
 **A connection attempt fails:** inspect `GET /v1/device`, then retry `POST /v1/device/connect`. A BLE attempt has a 15-second timeout and cleans up its scan/pending connection. RFCOMM opening has a further 12-second wait.
 
-**RFCOMM times out after switching from the phone:** if macOS logs report `BT_ERROR_INVALID_LINK_KEY`, stop the Bridge and follow the [verified separate-helper recovery procedure](docs/protocol.md#verified-recovery-on-2026-09-29). Forgetting the Mac bond, pairing with the standalone helper, exiting it, and starting the Bridge restored the data channel without unbinding the official phone account. Re-entering glasses pairing mode restored BLE advertising in one trial but did not establish that the existing Mac bond remained usable. The same recovery has now been verified through the GUI; reliable first-attempt pairing remains unresolved.
+**RFCOMM times out after switching from the phone:** if macOS logs report `BT_ERROR_INVALID_LINK_KEY`, stop the Bridge and follow the [verified separate-helper recovery procedure](docs/protocol.md#verified-recovery-on-2026-09-29). Forgetting the Mac bond, pairing with the standalone helper, exiting it, and starting the Bridge restored the data channel without unbinding the official phone account. Re-entering glasses pairing mode restored BLE advertising in one trial, but the existing Mac bond still needs its own verification. The GUI reproduces the same recovery; first-attempt pairing remains unreliable.
 
 **A control request returns `409`:** start a new script through this bridge process. Active script state is not recovered after a restart or after `stop`. Caption/prompt text requires an accepted session; stop that session before retrying a failed start.
 

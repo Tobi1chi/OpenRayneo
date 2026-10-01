@@ -19,7 +19,7 @@ A captured phone request on this business used Protobuf version `1`, type `1`, a
 }
 ```
 
-This identifies the version reported at capture time, not a fresh query of the current device. The response lists package types and package-info versions; it does not establish archive layout, compression, encryption, signatures, partition contents, or whether an offered package is full or incremental. The numeric validation-state sentinel is not decoded here.
+This identifies the version reported at capture time, not a fresh query of the current device. The response lists package types and package-info versions; archive layout, compression, encryption, signatures, partition contents, and full-versus-incremental status are still unknown. The numeric validation-state sentinel is not decoded here.
 
 ## Official APK leads
 
@@ -32,11 +32,11 @@ Flutter AOT strings identify these components:
 - `features/ota_page/utils/ota_firmware_download.dart`
 - `features/ota_page/utils/ota_firmware_reuse_validation.dart`
 
-Candidate upgrade-check paths are `/xrlauncherhwapi/v1/signApi/gray/upgrade` and `/xrlauncherapi/v1/signApi/gray/upgrade`. Their exact division between hardware/app updates, request fields, server selection, authentication, and response contract have not been established from these strings alone.
+Candidate upgrade-check paths are `/xrlauncherhwapi/v1/signApi/gray/upgrade` and `/xrlauncherapi/v1/signApi/gray/upgrade`. These strings alone do not reveal the division between hardware/app updates, request fields, server selection, authentication, and response contract.
 
-Strings such as `downloadFotaPackage`, `downloadOtaFile: URL:`, `_startDownloadOTAPackage downloadUrl=`, and `startDownloadOTAPackageAndPushToGlasses` identify download and transfer stages. The latter also indicates that a UI action may combine downloading and pushing, so merely locating a download flow does not establish a download-only button.
+Strings such as `downloadFotaPackage`, `downloadOtaFile: URL:`, `_startDownloadOTAPackage downloadUrl=`, and `startDownloadOTAPackageAndPushToGlasses` identify download and transfer stages. The latter also indicates that a UI action may combine downloading and pushing, so a download flow need not be a download-only button.
 
-No obvious firmware image was found among the APK's `.bin`, `.img`, `.fw`, `.dfu`, `.ota`, and `.zip` entries. The listed binary candidates instead included app assets and speech models. Existing app logcat and bugreport text did not contain the identified OTA download-log markers or a usable package URL. Android's empty `/metadata/ota/state` bugreport entry concerns the phone and is not a glasses firmware artifact.
+No obvious firmware image was found among the APK's `.bin`, `.img`, `.fw`, `.dfu`, `.ota`, and `.zip` entries. The listed binary candidates instead included app assets and speech models. Existing app logcat and bugreport text did not contain the identified OTA download-log markers or a usable package URL. Android's empty `/metadata/ota/state` bugreport entry concerns the phone, not the glasses.
 
 ## Alternative acquisition directly from the official app
 
