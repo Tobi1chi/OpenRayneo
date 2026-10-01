@@ -8,6 +8,18 @@ OpenRayneo is an unofficial, experimental Mac app and Bluetooth bridge with a lo
 
 It uses the glasses' existing notification, teleprompter, caption, prompt, and todo interfaces. Arbitrary graphics, screen mirroring, and custom display layouts are outside the current scope.
 
+## ASCII-style character video
+
+Turn a local video into a tiny text animation on the glasses. In **字符视频**, choose a movie, select **全角灰度 26×7** (full-width grayscale), **方块** (blocks), or experimental half blocks, then play at **5 or 10 updates/s**. Playback is silent; inversion and contrast enhancement are optional. The app decodes video locally and replaces the complete caption frame, skipping late frames to avoid catch-up playback.
+
+![Bad Apple!! rendered as a 26×7 full-width character animation](docs/assets/bad-apple-character-preview.gif)
+
+*Bad Apple!! — an 8-second local render preview at 10 fps, using the app's decoder and full-width brightness mapping with inversion enabled. This is a software preview, not footage through the glasses. The source PV artwork belongs to its respective creators.*
+
+Each character represents the average brightness of a small image region. “ASCII-style” describes the appearance: the current grayscale mode uses **full-width Unicode characters and ideographic spaces** because the earlier half-width ASCII modes misaligned on the glasses. Full-width grayscale alignment still needs device confirmation; use **检查字符对齐** before playback. The current renderer fills the grid and can distort the source aspect ratio. No video is bundled with the app.
+
+See [the character-video guide](docs/text-video.md) for rendering details and tested limits.
+
 ## Agent skill
 
 The repository includes a distributable [OpenRayneo API skill](.agents/skills/openrayneo-api/SKILL.md) with connection guidance, endpoint examples, session rules, and a local request helper. It lets a local agent operate an existing Bridge; installing the skill does not install or pair the glasses.

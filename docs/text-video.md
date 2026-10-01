@@ -35,6 +35,10 @@ The previous half-width ASCII implementation was checked for all 256 brightness 
 
 The full-width replacement passed disposable checks for 95 supported equal-advance reference glyphs, blank-space coverage, all 256 nearest-brightness mappings, 2×4 box averaging, inversion, 26×7 output dimensions, and the seven-row ruler. This verifies the Mac renderer only. Aspect-ratio correction remains pending: the decoder currently fills 52×28 samples and does not preserve the source ratio.
 
+## README preview
+
+The README embeds `assets/bad-apple-character-preview.gif`: an eight-second, silent excerpt from 00:08–00:16 of the user-supplied Bad Apple!! shadow-art PV. It contains 80 frames at 10 fps, rendered with the current `TextVideo.load` decoder and `TextVideoFrame.text(style: .fullWidth, inverted: true)` path. Core Text draws the 26×7 output using the same PingFang reference font. Labels and margins are presentation only; the GIF is a Mac software preview, not a recording of the glasses or proof of their glyph metrics. The original video is not distributed with the app. The PV artwork remains the work of its respective creators and is not covered by this repository's source-code license.
+
 ## Reference project
 
 The user suggested [bad-apple-lab/Bad-Apple](https://github.com/bad-apple-lab/Bad-Apple), inspected at commit `80e39ed58d754e4de420b7a1c474e53e20a71ba3` (MIT). Its [font generator](https://github.com/bad-apple-lab/Bad-Apple/blob/80e39ed58d754e4de420b7a1c474e53e20a71ba3/font/font.py) measures the upper/lower brightness of actual glyphs and builds a 256×256 lookup table. Its encoder combines two vertically adjacent grayscale samples per character, optionally normalizes frame contrast, and its preloader saves character frames for replay.
