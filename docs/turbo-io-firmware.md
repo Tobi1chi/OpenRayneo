@@ -4,7 +4,7 @@ Reviewed on 2026-09-29 against [Turbo1123/Turbo-IO commit cb3bcf59](https://gith
 
 ## Finding: actual modified firmware is published
 
-Turbo-IO publishes version-specific additions to Strix OS 1.0.4.12, including custom display pages and native application runtimes. This matches the OS version reported in our earlier official-app Bluetooth capture, though matching the version string alone does not establish installation compatibility.
+Turbo-IO publishes version-specific additions to Strix OS 1.0.4.12, including custom display pages and native application runtimes. This matches the OS version reported in our earlier official-app Bluetooth capture, though a matching version string does not imply installation compatibility.
 
 The current release inspected is [Android GUARD07 + TAP1-TEST-01](https://github.com/Turbo1123/Turbo-IO/releases/tag/android-105-guard07-tap1-test01), published 2026-09-27. Its firmware asset is `TurboIO-TAP1-TEST-01.zip` (9,320,672 bytes). The release also offers a modified Android APK; that APK was not downloaded or installed for this review.
 
@@ -28,7 +28,7 @@ Two packages are saved under the Git-ignored `analysis/firmware/turbo-io/` direc
 - `StrixOS-1.0.4.12-ORIGINAL-rollback.zip`, from the [R3 release](https://github.com/Turbo1123/Turbo-IO/releases/tag/firmware-strix-1.0.4.12-turbophoto-r3).
 - `TurboIO-TAP1-TEST-01.zip`, from the current Android/TAP1 release above.
 
-The author's [firmware README](https://github.com/Turbo1123/Turbo-IO/blob/cb3bcf59abaa903e89b3db120e8a8d8317e72a06/firmware-research/strix-1.0.4.12/README.md) explicitly describes the first package as stock members obtained from the official app cache and **repacked locally**. It is not the original server ZIP, a full flash backup, or an independently authenticated vendor release. The filename's “rollback” label is not a demonstrated recovery guarantee.
+The author's [firmware README](https://github.com/Turbo1123/Turbo-IO/blob/cb3bcf59abaa903e89b3db120e8a8d8317e72a06/firmware-research/strix-1.0.4.12/README.md) explicitly describes the first package as stock members obtained from the official app cache and **repacked locally**. It is not the original server ZIP, a full flash backup, or an independently authenticated vendor release, and the filename's “rollback” label does not guarantee recovery.
 
 Both ZIPs could be read with the standard archive reader; their ZIP encryption flags are unset. Their contents comprise `OtaFileInfo.json` and 14 payloads. That observation concerns the container, not every embedded component's internal format or the device's complete signing chain.
 
@@ -42,7 +42,7 @@ Comparison used the extracted bytes directly, not filenames or the author's chec
 | Other 13 payloads | — | — | Byte-for-byte identical |
 | `OtaFileInfo.json` | 14 entries | 14 entries | Parsed differences only in AP `Size` and `Md5` |
 
-Within the original AP file extent, 117 byte positions differ; the rest of the growth is beyond that extent. This count is not a count of instructions or independent patches, and includes any metadata/footer changes. It does not by itself prove the meaning or runtime safety of the modifications.
+Within the original AP file extent, 117 byte positions differ; the rest of the growth is beyond that extent. This count is not a count of instructions or independent patches and includes metadata/footer changes; it does not prove the meaning or runtime safety of the modifications.
 
 The package has separately named AP, Bluetooth, audio and other components, including `nuttx_bth.bin`, `nuttx_audio.bin`, `nuttx_apc1.bin`, `images.bin`, `lotties.bin`, `rives.bin`, `smf.json`, and audio algorithm DLL payloads. These provide distinct analysis targets. The baseline AP contains readable NuttX/LVGL source-path strings, supporting static inspection.
 
@@ -77,6 +77,6 @@ Model integration or existing text surfaces can work with stock firmware, while 
 
 OpenRayneo currently drives stock firmware surfaces directly from the Mac. Turbo-IO demonstrates a separate route to new eye-side pages by adding native handlers and renderers. A future Mac client could investigate sending that runtime's supported commands without making a phone the permanent relay, but that combination has not been tested here.
 
-Useful next investigations are stock `images.bin` and AP weather mappings, stock display entry points, and audio/channel configuration. The verified AP-only change set does not demonstrate a solution to our multiple-host pairing issue: the Bluetooth and audio payloads are unchanged, and no such behavior was validated in this review.
+Useful next investigations are stock `images.bin` and AP weather mappings, stock display entry points, and audio/channel configuration. The verified AP-only change set does not solve our multiple-host pairing issue: the Bluetooth and audio payloads are unchanged, and no such behavior was tested in this review.
 
 Turbo-IO's original code uses [PolyForm Noncommercial 1.0.0](https://github.com/Turbo1123/Turbo-IO/blob/cb3bcf59abaa903e89b3db120e8a8d8317e72a06/LICENSE); OpenRayneo uses Apache-2.0. Architecture/protocol research should be distinguished from importing implementation code. Any incorporation would need to respect the applicable license and cannot simply be relabeled Apache-2.0. Vendor firmware/resources retain their separate ownership. This review only adds descriptive research notes to OpenRayneo.

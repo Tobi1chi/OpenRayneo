@@ -19,7 +19,7 @@ curl -X POST http://127.0.0.1:8765/v1/recording/stop \
   -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
 ```
 
-The output is **48 kHz, 16-bit PCM, two-channel WAV**. This is the decoder's output format, not evidence of the hardware microphone sampling rate or the original Opus bandwidth. The Opus compression that occurred on the glasses is not undone by saving WAV.
+The decoder writes **48 kHz, 16-bit PCM, two-channel WAV**, preserving the samples produced by Opus decompression.
 
 The response's `recording` object provides `path`, `sampleRate`, `channels`, `bitsPerSample`, `bytes`, `seconds`, and `finalized`. After stop, verify `running: false`, `recording.finalized: true`, and `error: null`. Repeated stop requests are safe. ASR and recording share a single audio session; either stop endpoint stops that session, and another start returns `409` while it is active.
 
@@ -41,7 +41,7 @@ The bridge writes a 44-byte WAV header, then appends each decoded packet's sampl
 
 Buffer memory is bounded instead of accumulating the full recording. At this format, PCM uses 192,000 bytes per second, about **691 MB/hour** (659 MiB/hour). Classic RIFF WAV has a roughly 4 GiB size limit; the writer rejects growth beyond it. RF64, file rotation, and cross-session concatenation are not implemented.
 
-Use the stop endpoint before closing the app. Abrupt termination can leave the header behind the trailing audio by approximately one checkpoint interval; periodic updates reduce the recovery work but are not a crash-proof transactional file format. Do not assume every media player will refresh the duration of an already-open growing file.
+Use the stop endpoint before closing the app. Abrupt termination can leave the header behind the trailing audio by about one checkpoint interval; periodic updates reduce recovery work but the format is not crash-proof. Media players may not refresh the duration of an already-open growing file.
 
 ## Channels and missing audio
 
@@ -54,11 +54,11 @@ A follow-up controlled recording and listening experiment on 2026-09-29 establis
 | Channel 1 | `0` / `c0` | Bone-conduction microphone | The wearer's own voice |
 | Channel 2 | `1` / `c1` | Forward-facing microphone | Other people's voices in front of the wearer |
 
-This mapping was confirmed on the tested RayNeo iO through the owner's experiment, not through a hardware teardown or an official channel specification. It does not establish acoustic isolation, absence of signal processing, or the total number of physical microphones. Other models and firmware remain unverified.
+This mapping was confirmed on the tested RayNeo iO through the owner's experiment, not a hardware teardown or official specification. Acoustic isolation, signal processing, and the total number of physical microphones are unverified, as are other models and firmware.
 
-In a live 57.94-second test, all 2,897 received packets reported stereo. Roughly 92.8% of channel sample pairs differed and their zero-lag correlation was about 0.16. The two channels therefore contain different signals rather than duplicated mono samples. This does not establish whether they are raw microphone feeds, beamformed outputs, or other processed signals. No API to select additional physical microphone channels has been identified in the examined protocol and APK paths.
+In a live 57.94-second test, all 2,897 received packets reported stereo. Roughly 92.8% of channel sample pairs differed and their zero-lag correlation was about 0.16, so the two channels carry different signals rather than duplicated mono. Whether they are raw microphone feeds, beamformed outputs, or other processed signals is unknown, and the examined protocol and APK paths expose no API to select additional physical microphone channels.
 
-`missingAudioPackets` counts forward gaps in audio `seq`; `droppedAudioPackets` counts the bounded processing queue's overflow; `decodeErrors` counts failed decoding attempts. The live test reported zero for all three, and the finalized file contained 2,781,120 stereo frames at 48 kHz. This is evidence for that short test, not a guarantee of lossless transport in all conditions.
+`missingAudioPackets` counts forward gaps in audio `seq`; `droppedAudioPackets` counts the bounded processing queue's overflow; `decodeErrors` counts failed decoding attempts. All three counters stayed at zero during the live test. The finalized file contained 2,781,120 stereo frames at 48 kHz.
 
 Only successfully received and decoded packets are appended. Silence from valid packets is retained. Disconnections, missing packets, and failed decodes are not reconstructed or padded, so a recording with losses can be shorter than elapsed wall-clock time. Audio before the session starts cannot be recovered.
 

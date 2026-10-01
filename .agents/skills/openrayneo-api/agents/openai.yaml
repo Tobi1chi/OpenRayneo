@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenRayneo 眼镜 API"
+  short_description: "通过本机 API 控制雷鸟眼镜显示、提词、天气、待办和录音"
+  default_prompt: "使用 $openrayneo-api 检查本机眼镜连接，再按我的要求操作显示或音频功能。"

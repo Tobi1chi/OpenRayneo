@@ -289,6 +289,7 @@ private final class BLEReadinessSession: NSObject, CBCentralManagerDelegate, CBP
         defer { condition.unlock() }
         return [
             "phase": phase, "ready": ready, "bluetoothState": bluetoothState,
+            "bluetoothAuthorization": CBManager.authorization.rawValue,
             "scanning": scanStarted, "discoveredPeripheralCount": observedPeripherals.count,
             "pairingState": pairingState.map { Int($0) } as Any? ?? NSNull(),
             "lastError": failure as Any? ?? NSNull()
@@ -1360,6 +1361,21 @@ func resolveRayneoAddress() -> String? {
     let devices = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []
     let matches = devices.filter { ($0.nameOrAddress ?? "").localizedCaseInsensitiveContains("RayNeo iO") }
     return matches.count == 1 ? matches[0].addressString : nil
+}
+
+if let commandIndex = CommandLine.arguments.firstIndex(where: { $0 == "--pair" || $0 == "--pairing-status" || $0 == "--unpair" }) {
+    guard CommandLine.arguments.indices.contains(commandIndex + 1) else {
+        fputs("Usage: openrayneo-bridge --unpair|--pair|--pairing-status AA-BB-CC-DD-EE-FF\n", stderr)
+        exit(1)
+    }
+    let address = CommandLine.arguments[commandIndex + 1]
+    if CommandLine.arguments[commandIndex] == "--unpair" { exit(runUnpairingCommand(address: address)) }
+    exit(runPairingCommand(address: address, statusOnly: CommandLine.arguments[commandIndex] == "--pairing-status"))
+}
+
+if !CommandLine.arguments.contains("--headless"),
+   Bundle.main.bundlePath.hasSuffix(".app") || CommandLine.arguments.contains("--gui") {
+    MainActor.assumeIsolated { runDesktopApplication() }
 }
 
 guard let address = resolveRayneoAddress() else {

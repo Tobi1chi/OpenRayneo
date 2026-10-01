@@ -1,6 +1,6 @@
 # Glasses microphone ASR on macOS
 
-OpenRayneo can receive microphone audio from the glasses, decode it on the Mac, use Apple's on-device speech recognizer, and send recognized text back to the glasses' real-time prompt page. The Mac microphone is not used. Audio is saved only when explicitly requested through the [WAV recording API](recording.md). The bridge does not send it to a speech cloud service; cloud fallback is disabled.
+OpenRayneo can receive microphone audio from the glasses, decode it on the Mac, use Apple's on-device speech recognizer, and send recognized text back to the glasses' real-time prompt page. The Mac microphone is not used. Audio is saved only when explicitly requested through the [WAV recording API](recording.md). The bridge keeps audio local; cloud fallback is disabled.
 
 ## Requirements and launch
 
@@ -15,10 +15,12 @@ Build the application and launch it through Launch Services so privacy requests 
 sh scripts/build-app.sh
 export OPENRAYNEO_API_TOKEN="$(openssl rand -hex 24)"
 open -n -g ./OpenRayneoBridge.app \
-  --env "OPENRAYNEO_API_TOKEN=$OPENRAYNEO_API_TOKEN"
+  --env "OPENRAYNEO_API_TOKEN=$OPENRAYNEO_API_TOKEN" --args --headless
 ```
 
-Use an unused port with `--env OPENRAYNEO_PORT=8766` if necessary. Stop an existing bridge before launching another on the same port. The build script applies a local ad-hoc signature to bind the app's privacy descriptions; this is not notarization or a Developer ID distribution signature. macOS may request permission again after rebuilding.
+Use an unused port with `--env OPENRAYNEO_PORT=8766` if necessary. Stop an existing bridge before launching another on the same port. The build script prefers an available signing certificate so macOS can retain privacy consent across rebuilds; see [persistent permissions](desktop-app.md#persistent-macos-permissions). Ad-hoc fallback builds may prompt again after rebuilding. Local builds are not notarized.
+
+Alternatively, double-click the app and use its **语音与录音** panel. The desktop app manages the background service, permission request, and API token. Starting speech recognition or recording still requires an explicit button press.
 
 Request permission once, then start recognition:
 
@@ -44,7 +46,7 @@ The authorization endpoint waits up to 60 seconds for the system prompt. If it t
 
 All endpoints require the bearer token. `duration` is an integer number of seconds, defaults to `120`, and must be between `10` and `600`. Recognition stops at this limit, after 10 seconds without audio, on repeated decoding failures, or on a recognition/display error. Stop is idempotent. Add `"record": true` to the ASR start body to also save a stereo WAV; the default is no recording. Recording shares the same session lifetime and stops if ASR fails. Use the recording-only API when recognition should not affect recording duration.
 
-`audioPackets`, `decodedSeconds`, `decodeErrors`, `droppedAudioPackets`, and `audioRMS` distinguish missing audio from decoding and recognition problems. `displayedText` means the text write succeeded, not that a frame was visibly rendered. `transcript` keeps at most the latest 400 characters in memory; the display uses its last 96 characters. These values remain available after stop until the next successful start or process exit, and are not printed in normal logs. Treat status responses as potentially private speech content.
+`audioPackets`, `decodedSeconds`, `decodeErrors`, `droppedAudioPackets`, and `audioRMS` distinguish missing audio from decoding and recognition problems. `displayedText` means the text write succeeded; confirm visible rendering on the glasses. `transcript` keeps at most the latest 400 characters in memory; the display uses its last 96 characters. These values remain available after stop until the next successful start or process exit, and are not printed in normal logs. Treat status responses as potentially private speech content.
 
 Manual caption/prompt controls and teleprompter requests are rejected while ASR owns the display. Stop other display sessions before starting ASR. If a stop command cannot be sent, exit the prompt page on the glasses manually; the bridge reports the failure in `error`.
 
@@ -59,7 +61,7 @@ Manual caption/prompt controls and teleprompter requests are rejected while ASR 
 
 The audio queue is bounded to 64 packets; overflow is counted instead of accumulating an unbounded recording. Recognition tasks are renewed after a final result or 45 seconds. Renewal does not preserve a full conversation transcript and may lose words at a task boundary; seamless long-session recognition, packet-loss concealment, translation, and speaker separation are not implemented.
 
-The owner's subsequent microphone experiment identified channel 1 as bone-conduction/wearer audio and channel 2 as forward-facing/other-speaker audio; see the [recording channel mapping](recording.md#channels-and-missing-audio). The current ASR still downmixes both channels. Selecting a channel or running separate recognizers is a next implementation step; speaker roles should not be inferred from the mixed transcript alone.
+The owner's subsequent microphone experiment identified channel 1 as bone-conduction/wearer audio and channel 2 as forward-facing/other-speaker audio; see the [recording channel mapping](recording.md#channels-and-missing-audio). The current ASR still downmixes both channels. Selecting a channel or running separate recognizers is a next implementation step; the mixed transcript does not reveal speaker roles.
 
 ## Troubleshooting
 
@@ -75,4 +77,4 @@ The owner's subsequent microphone experiment identified channel 1 as bone-conduc
 
 Tested on the existing RayNeo iO and macOS 15.6.1 with Chinese on-device recognition. The first 90-second session decoded 4,487 packets without decoding errors or queue overflow, and automatically stopped at its duration limit. Recognition worked, but sending text only in `source_transcript` did not produce a readable body; the user observed title flicker.
 
-The corrected path keeps `source_transcript` fixed as a title and sends recognition results in `target_translation`, the prompt page's body field. The user confirmed that body text appeared and updated while speaking. A restarted session also received and decoded audio without errors. Manual prompt/teleprompter controls and duplicate ASR starts were checked to return `409` during recognition, and repeated stop requests completed successfully. This is a live functional test, not a measured accuracy or latency benchmark.
+The corrected path keeps `source_transcript` fixed as a title and sends recognition results in `target_translation`, the prompt page's body field. The user confirmed that body text appeared and updated while speaking. A restarted session also received and decoded audio without errors. Manual prompt/teleprompter controls and duplicate ASR starts were checked to return `409` during recognition, and repeated stop requests completed successfully. This is a live functional test; accuracy and latency were not measured.

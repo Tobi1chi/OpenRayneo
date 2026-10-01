@@ -8,7 +8,7 @@ Sources:
 
 - APK `P3/EnumC0848h.java`: business IDs `LAUNCHER = 15` and `SCHEDULE_TODO = 22`.
 - APK `resources/transportMessage.proto`: envelope fields `version = 1`, `type = 2`, `message = 3`, and optional binary `data = 4`.
-- Official HCI samples: weather requests and replies, dashboard configuration queries, and empty schedule batches. Six retained HCI logs were inspected for complete AA55 frames; no populated schedule batch was found. This inspection does not reassemble frames split across HCI packets.
+- Official HCI samples: weather requests and replies, dashboard configuration queries, and empty schedule batches. Six retained HCI logs were inspected for complete AA55 frames; no populated schedule batch was found. Frames split across HCI packets were not reassembled.
 - Flutter AOT `libapp.so`: model, method, and package names supporting further investigation. Strings alone do not establish field mappings or message type numbers.
 
 The messages travel over the existing Classic Bluetooth SPP/RFCOMM connection, using the [AA55 framing](protocol.md). They are structured data for built-in firmware pages, rather than rendered images.
@@ -37,9 +37,9 @@ The observed phone-to-glasses type `5` JSON is:
 {"scheduleTotal":0,"isLastBatch":true,"eventList":[]}
 ```
 
-This differs from the todo type `6` envelope, which uses `total`. Do not reuse the todo outer object unchanged for schedules. The empty batch is evidence of an official synchronization message, not a safe query or display-opening command; do not send it as a probe because it may clear existing schedules.
+This differs from the todo type `6` envelope, which uses `total`. Do not reuse the todo outer object unchanged for schedules. The empty batch is an official synchronization message, not a safe query or display-opening command; do not send it as a probe because it may clear existing schedules.
 
-The capture also contains type `9` with `{"authStatus":1}` near schedule synchronization. The APK contains `SyncCalendarPermissionMsg`. The capture does not establish all permission values or prove whether this message is required before every write.
+The capture also contains type `9` with `{"authStatus":1}` near schedule synchronization. The APK contains `SyncCalendarPermissionMsg`. The capture does not give all permission values or whether this message is required before every write.
 
 The task query captured on this shared business uses type `15`:
 
@@ -47,7 +47,7 @@ The task query captured on this shared business uses type `15`:
 {"queryType":0,"eventType":1,"lastSyncTime":0,"eventIDList":[],"needFullData":false}
 ```
 
-Type `16` replies include `scheduleTotal`, `todoTotal`, `batchNo`, `isLastBatch`, `needFullData`, `chunkInfo`, and `dataList`. OpenRayneo already uses `needFullData: true` for its verified todo read/merge/write path. The observed `eventType: 1` query and the presence of both counters do not establish how to request schedule-only records; do not guess another enum value.
+Type `16` replies include `scheduleTotal`, `todoTotal`, `batchNo`, `isLastBatch`, `needFullData`, `chunkInfo`, and `dataList`. OpenRayneo already uses `needFullData: true` for its verified todo read/merge/write path. The observed `eventType: 1` query and the two counters do not show how to request schedule-only records; do not guess another enum value.
 
 Flutter symbols include `ScheduleEventItem`, `SyncScheduleMsg`, `BatchSyncScheduleMsg`, `ScheduleStatusUpdateMsg`, `ScheduleEventDTO`, `syncSchedule`, `batchSyncSchedule`, and `scheduleStatusUpdate`. Relevant package paths include:
 
@@ -55,7 +55,7 @@ Flutter symbols include `ScheduleEventItem`, `SyncScheduleMsg`, `BatchSyncSchedu
 - `features/calendar_page/presentation/calendar_view_model.dart`
 - `features/dashboard_page/presentation/pages/schedule_settings_page.dart`
 
-Calendar logs and symbols indicate a phone-side system-calendar import path, but the conversion to an individual on-wire event remains unresolved. A populated official schedule capture is needed to establish event fields, timestamp units, timezone/all-day handling, stable IDs, reminders, status changes, and any incremental/delete messages. Global strings such as `startTime`, `endTime`, and `recurrenceRule` are not sufficient evidence that those are the wire keys.
+Calendar logs and symbols indicate a phone-side system-calendar import path, but the conversion to an individual on-wire event is unknown. A populated official schedule capture is needed to establish event fields, timestamp units, timezone/all-day handling, stable IDs, reminders, status changes, and incremental/delete messages. Global strings such as `startTime`, `endTime`, and `recurrenceRule` do not by themselves identify the wire keys.
 
 ## Weather commands
 
@@ -73,7 +73,7 @@ Weather updates use Launcher business `0x0F`, not a dedicated weather business I
 }
 ```
 
-Values above are illustrative. The important encoding details are that `payload.data` is a **JSON string**, not an embedded object, and `payload.ts` is a **string containing Unix seconds** in the samples. `value` and `mode` are both numeric `0`; their wider semantics are not established.
+Values above are illustrative. The important encoding details are that `payload.data` is a **JSON string**, not an embedded object, and `payload.ts` is a **string containing Unix seconds** in the samples. `value` and `mode` are both numeric `0`; their wider semantics are unknown.
 
 ### Current-location weather
 
@@ -109,9 +109,9 @@ The observed location label was the generic current-location label. This compact
 ]
 ```
 
-`location_id` is a string. `temp_range` is already formatted for display. The observed `hourly` keys are display labels, with `[temperature, icon]` pairs; five entries appeared in a captured update. Neither a maximum entry count nor multilingual/24-hour label behavior has been established. An initial direct Mac test confirmed all supplied fields displayed, but dictionary encoding scrambled the hourly sequence. The HTTP API therefore uses an ordered array and explicitly preserves that order when constructing the on-wire object; lexical sorting of clock labels would be incorrect across values such as `9am` and `10am`.
+`location_id` is a string. `temp_range` is already formatted for display. The observed `hourly` keys are display labels, with `[temperature, icon]` pairs; five entries appeared in a captured update. Neither a maximum entry count nor multilingual/24-hour label behavior is known. An initial direct Mac test confirmed all supplied fields displayed, but dictionary encoding scrambled the hourly sequence. The HTTP API therefore uses an ordered array and explicitly preserves that order when constructing the on-wire object; lexical sorting of clock labels would be incorrect across values such as `9am` and `10am`.
 
-The captures associate icons `100` and `150` with clear-weather descriptions. Direct Mac testing confirmed that changing from `100` to `150` changes the displayed icon to a night/moon icon. The full icon table and temperature-unit negotiation are not established. Do not assume another weather provider's numeric codes are interchangeable.
+The captures associate icons `100` and `150` with clear-weather descriptions. Direct Mac testing confirmed that changing from `100` to `150` changes the displayed icon to a night/moon icon. The full icon table and temperature-unit negotiation are unknown; another weather provider's numeric codes may not be interchangeable.
 
 For each command the glasses returned Launcher type `19`, for example:
 
@@ -119,7 +119,7 @@ For each command the glasses returned Launcher type `19`, for example:
 {"cmd":"weather_update","payload":{"value":0}}
 ```
 
-The current-location reply uses `cmd: current_weather_update`. These are matching protocol replies from the official flow. Direct Mac city updates also returned `value: 0` and were visibly confirmed. The meaning of all `value` codes remains unverified; `value: 0` should not yet be advertised as a universal success code.
+The current-location reply uses `cmd: current_weather_update`. These are matching protocol replies from the official flow. Direct Mac city updates also returned `value: 0` and were visibly confirmed. The meaning of all `value` codes is unverified; do not treat `value: 0` as a universal success code.
 
 ### Dashboard configuration and data sources
 
@@ -129,11 +129,11 @@ The official app queries the dashboard using type `18`:
 {"cmd":"dashboard_config","payload":{"value":0,"mode":0,"data":"","ts":"0"}}
 ```
 
-The type `19` reply contains another JSON string in `payload.data`, including `simple_mode`, `widgets`, `widgets_v2`, and `widgets_data`. The observed configuration maps weather to widget ID `1`, todo to `2`, and schedule to `3`; its `widgets_data.weather.location_ids` contains the configured city IDs. This establishes a configuration read path, not a safe contract for modifying dashboard layout.
+The type `19` reply contains another JSON string in `payload.data`, including `simple_mode`, `widgets`, `widgets_v2`, and `widgets_data`. The observed configuration maps weather to widget ID `1`, todo to `2`, and schedule to `3`; its `widgets_data.weather.location_ids` contains the configured city IDs. This is a configuration read path, not a safe contract for modifying dashboard layout.
 
-The APK contains `WeatherComponent`, `LocationWeatherComponent`, `pushCurrentLocationWeatherToGlasses`, `fetchWeatherHourlyByGps`, and API paths `/profileapi/weather/getCityList` and `/profileapi/weather/getWeatherInfo`. Together with the captured updates, this supports a phone-side weather-fetch/format/push design. It does not prove the complete HTTP request/authentication contract or underlying weather provider. The glasses receive display data; a Mac implementation could fetch from its own weather source and format the observed Bluetooth payloads, subject to direct device verification.
+The APK contains `WeatherComponent`, `LocationWeatherComponent`, `pushCurrentLocationWeatherToGlasses`, `fetchWeatherHourlyByGps`, and API paths `/profileapi/weather/getCityList` and `/profileapi/weather/getWeatherInfo`. Together with the captured updates, this supports a phone-side weather-fetch/format/push design. The complete HTTP request/authentication contract and weather provider are unknown. The glasses receive display data; a Mac implementation could fetch from its own weather source and format the observed Bluetooth payloads, subject to direct device verification.
 
-Strings `weather_request` and `current_weather_request` also exist, but no such commands were found in the inspected complete frames. Their direction, type, trigger, and response timing remain open. A captured sequence of repeated updates does not establish a fixed refresh interval.
+Strings `weather_request` and `current_weather_request` also exist, but no such commands were found in the inspected complete frames. Their direction, type, trigger, and response timing are unknown, and a captured sequence of repeated updates does not imply a fixed refresh interval.
 
 ## Next implementation steps
 
@@ -170,7 +170,7 @@ Example HTTP request body (the bridge converts `hourly` to an ordered JSON objec
 
 Read `config.widgets_data.weather.location_ids` before a city test and use an existing ID. Dashboard configuration contains no weather-value snapshot, so it cannot serve as a backup of the previously displayed temperatures. The captured historical weather is not a current forecast.
 
-The bridge serializes weather data into the required JSON string, adds the current timestamp, sends Launcher type `18`, and waits up to five seconds for type `19` with the matching command and a receipt time after the request. Operations share the same lock as other display actions. These replies do not establish a transaction ID, so a delayed reply from a previous timed-out call with the same command may still be ambiguous.
+The bridge serializes weather data into the required JSON string, adds the current timestamp, sends Launcher type `18`, and waits up to five seconds for type `19` with the matching command and a receipt time after the request. Operations share the same lock as other display actions. These replies carry no transaction ID, so a delayed reply from a previous timed-out call with the same command may be ambiguous.
 
 Weather writes return HTTP `202` with `sent`, `acknowledged`, optional raw `reply`, and `visible: unverified`. No universal success meaning is assigned to `payload.value`. Dashboard reads return `200` on a matching reply or `504` on timeout. Weather data is supplied by the caller; the bridge does not fetch forecasts, update on a timer, alter city selections, or automatically restore old values. Reconnecting the official app can replace test values with its weather updates.
 
