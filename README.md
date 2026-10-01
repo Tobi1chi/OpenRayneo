@@ -8,6 +8,14 @@ OpenRayneo is an unofficial, experimental Bluetooth bridge with a local HTTP API
 
 It uses the glasses' existing notification, teleprompter, caption, prompt, and todo interfaces. Arbitrary graphics, screen mirroring, and custom display layouts are outside the current scope.
 
+## Agent skill
+
+The repository includes a distributable [OpenRayneo API skill](.agents/skills/openrayneo-api/SKILL.md) with connection guidance, endpoint examples, session rules, and a local request helper. It lets a local agent operate an existing Bridge; installing the skill does not install or pair the glasses.
+
+Agents that discover `.agents/skills/` can use it from this checkout. For use outside the repository, copy the complete `.agents/skills/openrayneo-api/` directory into your agent's skill directory (for Codex, `${CODEX_HOME:-$HOME/.codex}/skills/`). Other agents can read `SKILL.md` directly. Keep its `references/` and `scripts/` alongside it.
+
+Configure the running Bridge's current `OPENRAYNEO_API_URL` and `OPENRAYNEO_API_TOKEN` locally, then ask: **“Use $openrayneo-api to check the glasses connection and display my text.”** Never publish your token. The helper requires `uv` and uses only the Python standard library; it does not retry device writes automatically.
+
 ## What works
 
 Verified on one RayNeo iO with an Apple Silicon Mac running macOS 15.6.1:

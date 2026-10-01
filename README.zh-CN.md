@@ -8,6 +8,14 @@ OpenRayneo 是一个非官方、实验性的蓝牙 Bridge，提供本机 HTTP AP
 
 目前复用眼镜已有的通知、提词器、字幕、实时提示和待办界面，不提供任意图形绘制、屏幕镜像或自定义显示布局。
 
+## 本地 Agent Skill
+
+仓库提供可分发的 [OpenRayneo API skill](.agents/skills/openrayneo-api/SKILL.md)，包含连接指引、接口示例、会话规则和本机请求脚本，供其他人的 agent 操作已运行的 Bridge。安装 skill 不会自动安装 Bridge 或配对眼镜。
+
+支持 `.agents/skills/` 的 agent 可从仓库发现它。跨项目使用时，将整个 `.agents/skills/openrayneo-api/` 目录复制到 agent 的 skill 目录；Codex 对应 `${CODEX_HOME:-$HOME/.codex}/skills/`。其他 agent 也可以直接读取 `SKILL.md`，保留同目录下的 `references/` 和 `scripts/` 即可。
+
+在本机配置当前服务的 `OPENRAYNEO_API_URL` 和 `OPENRAYNEO_API_TOKEN`，然后要求：**“使用 $openrayneo-api 检查眼镜连接，并显示我提供的文字。”** 不要公开令牌。调用脚本通过 `uv` 运行，仅使用 Python 标准库，不会自动重试设备写入。
+
 ## 已验证功能
 
 以下结果来自一台 RayNeo iO 和运行 macOS 15.6.1 的 Apple Silicon Mac：
