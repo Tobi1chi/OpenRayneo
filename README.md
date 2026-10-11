@@ -59,13 +59,13 @@ The glasses' firmware version was not recorded. Compatibility with other firmwar
 - Xcode Command Line Tools or Xcode with Swift 5.10 or later. Development was tested with Swift 6.1.2.
 - Bluetooth permission for the bridge or the application launching it, as requested by macOS.
 
-The Swift package uses Apple's system frameworks and has no external Swift package dependencies. Optional glasses-microphone ASR additionally requires `libopus` and on-device speech recognition assets; see [ASR setup](docs/asr.md). The official Android APK and Bluetooth captures are not needed to build or run it.
+The Swift package uses Apple's system frameworks and has no external Swift package dependencies. App packaging needs `libopus` on the build machine (`brew install opus`) and bundles it for runtime use. ASR also needs Apple's on-device speech assets; see [ASR setup](docs/asr.md). The official Android APK and Bluetooth captures are not needed to build or run it.
 
 ## macOS download
 
 Download the Apple Silicon (arm64) ZIP from [GitHub Releases](https://github.com/Tobi1chi/OpenRayneo/releases). Unzip it and move `OpenRayneoBridge.app` to Applications, then open its **Device & API** page. New devices can use **Add and Pair Glasses**; already paired devices can connect directly. The download does not require Xcode.
 
-The first release is experimental, ad-hoc signed, and not Apple-notarized. macOS Gatekeeper may block its first launch; use the system's per-app approval if you choose to run it. macOS 13+ is the deployment target; device testing used macOS 15.6.1 on Apple Silicon. No Intel binary is included. Optional ASR/WAV recording requires a local `libopus` installation (`brew install opus`); ASR also needs Apple's local language assets and Speech Recognition permission. The ZIP contains no videos, recordings, or credentials.
+The v0.2.0 release is experimental, ad-hoc signed, and not Apple-notarized. macOS Gatekeeper may block its first launch; use the system's per-app approval if you choose to run it. The v0.2.0 app requires macOS 15+ because of its bundled Opus library; the Swift code and driver deployment target remains macOS 13. Device testing used macOS 15.6.1 on Apple Silicon. No Intel binary is included. The original prerelease requires a local `libopus` installation for ASR/WAV; v0.2.0 bundles it and the two-channel driver installer; ASR also needs Apple's local language assets and Speech Recognition permission. The ZIP contains no videos, recordings, or credentials.
 
 For source builds and headless use, follow the steps below. To create a release ZIP from source, see [release packaging](docs/releases.md).
 
@@ -182,6 +182,9 @@ All endpoints except `GET /health` require `Authorization: Bearer <token>`.
 | `GET` | `/v1/asr` | Audio statistics, current transcript, display writes, and errors |
 | `POST` | `/v1/recording/start`, `/stop` | Start or stop one continuous stereo WAV recording |
 | `GET` | `/v1/recording` | Recording path, duration, finalization state, and audio statistics |
+| `GET` | `/v1/virtual-mic/devices` | List installed virtual audio devices |
+| `POST` | `/v1/virtual-mic/start`, `/stop` | Forward both channels to the built-in microphone pair |
+| `GET` | `/v1/virtual-mic` | Forwarding status, selected device/channel, and buffer statistics |
 | `POST` | `/v1/lifelog/observe`, `/switch`, `/record`, `/stop` | Experimental LifeLog observation, enablement, audio request, and cleanup |
 | `GET` | `/v1/lifelog` | Bounded wake/exit events and audio/VPU/VAD counters |
 
@@ -226,7 +229,7 @@ curl -X POST http://127.0.0.1:8765/v1/captions/stop \
   -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
 ```
 
-Check `accepted: true` in the start response before sending text. Replace `captions` with `prompts` to use the prompt page; its text body can include `translation` for an answer and `final: true`. Stop each session when finished. Prompt startup activates the glasses' audio uplink; the bridge discards it unless an explicit ASR session is active.
+Check `accepted: true` in the start response before sending text. Replace `captions` with `prompts` to use the prompt page; its text body can include `translation` for an answer and `final: true`. Stop each session when finished. Prompt startup forwards both built-in virtual microphones by default and requires the installed driver; `duration` defaults to 3600 seconds. Use `microphone_enabled:false` for text only. Answer updates reuse the audio session; prompt stop closes the page and both outputs.
 
 Todo creation accepts `{"title":"Prepare notes","important":false}` and returns `eventID` and `readBack`. It uses a full-list read/merge/sync, so keep the official phone app disconnected during writes. Open the glasses' todo menu manually. Deletion is limited to IDs created by the running bridge; a restart loses this ownership state. See [display protocol and API details](docs/display-protocol.md) for tested behavior and limitations.
 
@@ -243,6 +246,12 @@ The experimental ASR path decodes glasses audio on the Mac, uses Apple's on-devi
 ### Local WAV recording
 
 Use `/v1/recording/start` to record without ASR, or add `"record": true` to an ASR start request. Audio is appended to one 48 kHz, 16-bit stereo WAV, with a header checkpoint every second and finalization on stop. Files default to `~/Music/OpenRayneo/Recordings/`. See [recording setup, size limits, and channel findings](docs/recording.md).
+
+### Two built-in virtual microphones for Codex
+
+The app bundles its own audio driver installer and Opus decoder. In **设备与 API**, install the built-in driver once with macOS administrator authentication; connection then automatically starts simultaneous forwarding to **OpenRayneo Microphone Channel 1** (wearer) and **Channel 2** (forward-facing). In Codex select Channel 1; another app can read Channel 2 at the same time. BlackHole and Background Music are not required. If the inputs do not appear after installation, restart the Mac and refresh devices.
+
+Forwarding does not save WAV files, run ASR, or change default audio devices. It shares the prompt page with answer updates and remains exclusive with ASR/recording. Desktop connection enables both channels by default; driver installation and duration settings live in **设备与 API**, with no separate microphone page. See [built-in driver setup, API, and validation limits](docs/virtual-microphone.md).
 
 ### Response semantics
 

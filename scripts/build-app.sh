@@ -24,9 +24,29 @@ if [ "$signing_identity" = - ]; then
 fi
 
 swift build --package-path "$workspace_dir" --configuration release
-mkdir -p "$app_dir/Contents/MacOS"
+mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Contents/Frameworks"
 cp "$workspace_dir/.build/release/openrayneo-bridge" "$app_dir/Contents/MacOS/openrayneo-bridge"
 cp "$workspace_dir/Info.plist" "$app_dir/Contents/Info.plist"
+OPENRAYNEO_SIGNING_IDENTITY="$signing_identity" sh "$workspace_dir/scripts/build-audio-driver.sh"
+OPENRAYNEO_DRIVER_PACKAGE="$app_dir/Contents/Resources/OpenRayneoAudio.pkg" sh "$workspace_dir/scripts/package-audio-driver.sh"
+
+opus_library=${OPENRAYNEO_OPUS_LIBRARY:-}
+if [ -z "$opus_library" ]; then
+    for candidate in /opt/homebrew/opt/opus/lib/libopus.dylib /usr/local/opt/opus/lib/libopus.dylib; do
+        if [ -f "$candidate" ]; then opus_library=$candidate; break; fi
+    done
+fi
+if [ -z "$opus_library" ] || [ ! -f "$opus_library" ]; then
+    printf '%s\n' 'App packaging requires libopus: brew install opus, or set OPENRAYNEO_OPUS_LIBRARY. The built app bundles it for users.' >&2
+    exit 1
+fi
+if [ -f "$app_dir/Contents/Frameworks/libopus.dylib" ]; then
+    chmod u+w "$app_dir/Contents/Frameworks/libopus.dylib"
+fi
+cp "$opus_library" "$app_dir/Contents/Frameworks/libopus.dylib"
+install_name_tool -id @rpath/libopus.dylib "$app_dir/Contents/Frameworks/libopus.dylib"
+codesign --force --sign "$signing_identity" "$app_dir/Contents/Frameworks/libopus.dylib"
+cp "$workspace_dir/ThirdParty/opus/COPYING" "$app_dir/Contents/Resources/opus-COPYING"
 codesign --force --sign "$signing_identity" --identifier com.openrayneo.bridge "$app_dir"
 codesign --verify --strict "$app_dir"
 printf 'Built %s\n' "$app_dir"

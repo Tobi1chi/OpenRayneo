@@ -39,13 +39,13 @@
 
 结束：`POST /v1/captions/stop`。start 超时也可能留下待确认会话，需要 stop。重复 stop 没有匹配会话时会返回 `409`，并非通用幂等接口。
 
-实时提示：使用对应的 `/v1/prompts/start`、`/text`、`/stop`，start 正文为 `{}`。正文示例：
+实时提示：使用对应的 `/v1/prompts/start`、`/text`、`/stop`。start 正文 `{}` 默认开启两路内置麦克风转送，需已安装驱动；`duration` 默认 3600、允许 10–21600 秒。返回 `accepted:true`、共享 SID 和音频状态。只显示文字时用 `{"microphone_enabled":false}`。更新正文沿用同一会话，不中断音频；stop 同时关闭页面和两路输出。正文示例：
 
 ```json
 {"text":"固定标题","translation":"正文或回答放在这里","final":true}
 ```
 
-提示页面会激活眼镜音频上行，即使协议 `save_audio:false`。普通显示路径丢弃音频，仅显式 ASR/录音会解码或保存。纯文本面板优先用字幕，结束提示时发 stop。
+提示页面会激活眼镜音频上行，即使协议 `save_audio:false`。实时提示默认解码并转送两路声音，不录音、不识别；仅 `microphone_enabled:false` 的文字会话丢弃音频。纯文本面板优先用字幕，结束提示时发 stop。
 
 ### 网格规则
 
@@ -113,6 +113,18 @@
 WAV 是单个持续追加的 48 kHz、16-bit 双声道文件，默认在 `~/Music/OpenRayneo/Recordings/`。每秒更新头，停止时结束写入。完成后检查 `running:false`、`recording.finalized:true`、`error:null`，使用返回的 `recording.path`，不要猜文件名。断连或无音频会停止，不能自动续入旧文件。
 
 测试机通道 1（PCM 索引 0）被佩戴者确认是骨传导/自己的声音，通道 2（索引 1）是前向/他人声音；不是所有设备的硬件规格保证。现有 ASR 混合两路；没有独立选择麦克风或说话人分离 API。
+
+## 两路内置虚拟麦克风
+
+App 的“虚拟麦克风”页面提供内置驱动安装包，安装由系统请求管理员授权；API 不安装驱动、不处理密码。安装后应出现 `OpenRayneo Microphone Channel 1/2`，UID 分别是 `com.openrayneo.microphone.channel1`、`com.openrayneo.microphone.channel2`。如未加载，由用户按安装指引重启 Mac，不自行重启系统音频服务。
+
+`GET /v1/virtual-mic/devices` 返回在线虚拟双向设备的 `devices` 列表（`uid`、`name`、输入/输出通道数）。`POST /v1/virtual-mic/start` 使用 `{}` 或 `{"duration":3600}` 同时转送两路；duration 默认 3600、允许 10–21600 秒，两路内置设备均需就绪。声道 1 是佩戴者声音，声道 2 是前方声音，接收方分别选择对应输入设备。App 打包包含 Opus；单独运行 Swift 命令行构建时仍需本机解码库。
+
+`GET /v1/virtual-mic` 返回共享音频状态，`engine:virtual-microphone`、`recording:null`，`virtualMicrophones` 为两路目标设备、通道、引擎状态和缓冲计数的数组，单数 `virtualMicrophone` 是第一路的兼容字段。转送不保存 WAV、不执行 ASR、不修改系统默认输入/输出；API 成功不能证明 Codex 已收到声音。
+
+旧的显式 `{"deviceUID":"已安装的回环设备 uid","channel":1}` 请求保留为单路兼容模式，channel 可选 1 或 2；它不会同时启动内置两路。
+
+ASR、录音和转送共享一个独占会话，任一 stop 均会结束该会话。仅在用户要求时启动，先结束自己拥有的显示/音频会话，记录模式和 SID。用 `POST /v1/virtual-mic/stop` 结束自己启动的转送；检查顶层 `running:false`、两路引擎 `running:false`、`error:null`，重复 stop 安全。转送与 `/v1/prompts/text` 共用实时提示页，可持续更新完整回答；独立字幕、提词器与 ASR/录音仍互斥；单声道眼镜音频无法分离来源，会报错停止。
 
 ## 全天智记诊断（仅按要求使用）
 

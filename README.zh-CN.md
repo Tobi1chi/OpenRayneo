@@ -35,6 +35,7 @@ OpenRayneo 是一个非官方、实验性的 Mac 应用和蓝牙 Bridge，提供
 | 功能 | 实测结果 |
 | --- | --- |
 | Mac 蓝牙直连 | BLE 认证和 RFCOMM 26 通道正常 |
+| 内置 Channel 1/2 麦克风 | 已安装加载；合成双声道 Opus 经两路原生设备、三个独立输入客户端的同时回环测试通过 |
 | 自定义通知 | 中文标题、正文正常显示 |
 | 中文提词稿 | 短稿和 120 行、16,319 字节的长稿正常显示 |
 | 播放控制 | 暂停、继续、退出均已目视确认 |
@@ -59,13 +60,13 @@ OpenRayneo 是一个非官方、实验性的 Mac 应用和蓝牙 Bridge，提供
 - Xcode Command Line Tools 或 Xcode，Swift 5.10 或更高版本；开发环境实测为 Swift 6.1.2。
 - 按 macOS 提示，授予 Bridge 或启动它的应用蓝牙访问权限。
 
-项目使用 Apple 系统框架，没有第三方 Swift 包依赖。可选的眼镜麦克风 ASR 还需要 `libopus` 和系统本地语音识别资源，详见 [ASR 配置](docs/asr.md)。构建和运行均不需要官方 Android APK 或蓝牙抓包文件。
+项目使用 Apple 系统框架，没有第三方 Swift 包依赖。源码打包需要构建机安装 `libopus`（`brew install opus`），生成的 App 会内置解码库；ASR 还需要系统本地语音识别资源，详见 [ASR 配置](docs/asr.md)。构建和运行均不需要官方 Android APK 或蓝牙抓包文件。
 
 ## 下载 macOS 软件包
 
 从 [GitHub Releases](https://github.com/Tobi1chi/OpenRayneo/releases) 下载 Apple Silicon（arm64）ZIP，解压后把 `OpenRayneoBridge.app` 移到“应用程序”，打开 **设备与 API** 页面。新眼镜可选择 **添加并配对眼镜**；已配对设备直接连接。使用下载的软件包不需要 Xcode。
 
-首个版本为实验版，采用 ad-hoc 签名，未经过 Apple 公证。首次打开可能被 macOS Gatekeeper 拦截；决定运行时，可使用系统提供的单个应用批准入口。部署目标是 macOS 13+，真机实测为 Apple Silicon 上的 macOS 15.6.1，本次不提供 Intel 二进制。可选 ASR/WAV 录音需要本机安装 `libopus`（`brew install opus`）；ASR 还需要 Apple 本地语言资源和语音识别权限。ZIP 不包含视频、录音或凭据。
+v0.2.0 为实验版，采用 ad-hoc 签名，未经过 Apple 公证。首次打开可能被 macOS Gatekeeper 拦截；决定运行时，可使用系统提供的单个应用批准入口。v0.2.0 下载包内置的 Opus 库要求 macOS 15+；Swift 源码和驱动的部署目标仍为 macOS 13。真机实测为 Apple Silicon 上的 macOS 15.6.1，本次不提供 Intel 二进制。原首发包的 ASR/WAV 需要本机安装 `libopus`；v0.2.0 已内置解码库和两路麦克风驱动安装包；ASR 还需要 Apple 本地语言资源和语音识别权限。ZIP 不包含视频、录音或凭据。
 
 源码构建与 headless 使用方式见下文。发布包的构建步骤见[发布打包说明](docs/releases.md)。
 
@@ -180,6 +181,9 @@ curl -X POST http://127.0.0.1:8765/v1/notifications \
 | `GET` | `/v1/asr` | 音频统计、当前识别文字、显示写入结果及错误 |
 | `POST` | `/v1/recording/start`、`/stop` | 启停连续双声道 WAV 录音 |
 | `GET` | `/v1/recording` | 文件路径、录音时长、文件完成状态和音频统计 |
+| `GET` | `/v1/virtual-mic/devices` | 列出已安装的虚拟音频设备 |
+| `POST` | `/v1/virtual-mic/start`、`/stop` | 同时转送眼镜两路声音到内置虚拟麦克风 |
+| `GET` | `/v1/virtual-mic` | 转送状态、目标设备、通道和缓冲统计 |
 | `POST` | `/v1/lifelog/observe`、`/switch`、`/record`、`/stop` | 实验性全天智记监听、开关、音频请求及退出 |
 | `GET` | `/v1/lifelog` | 唤醒/退出事件及音频、VPU、VAD 计数 |
 
@@ -224,7 +228,7 @@ curl -X POST http://127.0.0.1:8765/v1/captions/stop \
   -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
 ```
 
-启动响应中确认 `accepted: true` 后再发送文字。将路径中的 `captions` 换成 `prompts` 即可使用实时提示页面；文字请求可包含作为回答的 `translation` 和 `final: true`。结束后调用对应的 `stop`。实时提示启动会开启眼镜音频上行；只有显式启动 ASR 会话后才处理音频，其他情况下直接丢弃。
+启动响应中确认 `accepted: true` 后再发送文字。将路径中的 `captions` 换成 `prompts` 即可使用实时提示页面；文字请求可包含作为回答的 `translation` 和 `final: true`。结束后调用对应的 `stop`。实时提示启动默认同时转送 Channel 1/2，需已安装内置驱动；`duration` 默认 3600 秒。用 `microphone_enabled:false` 可只显示文字。更新回答复用同一会话，不中断音频，stop 同时关闭显示与两路转送。
 
 新增待办接受 `{"title":"准备讲稿","important":false}`，返回 `eventID` 和 `readBack`。实现采用完整列表读取、合并、同步，写入期间请断开官方手机 App。需要手动打开眼镜的待办菜单查看。删除仅限当前 Bridge 进程创建的条目，重启后不会恢复条目归属。已验证行为和限制详见[显示协议与 API 说明](docs/display-protocol.md)。
 
@@ -241,6 +245,12 @@ curl -X POST http://127.0.0.1:8765/v1/captions/stop \
 ### 本地 WAV 录音
 
 调用 `/v1/recording/start` 可以只录音、不识别；也可以在 ASR 启动请求中加入 `"record": true`。音频持续追加到同一个 48 kHz、16-bit 双声道 WAV，每秒更新文件头，停止时完成写入。默认保存到 `~/Music/OpenRayneo/Recordings/`。详见[录音使用、容量限制和声道分析](docs/recording.md)。
+
+### 两路内置虚拟麦克风
+
+App 自带音频驱动安装包和 Opus 解码库。在 **设备与 API** 页面安装一次内置驱动（macOS 请求管理员授权），连接后默认同时转送到 **OpenRayneo Microphone Channel 1（自己的声音）** 和 **Channel 2（前方声音）**。Codex 选择 Channel 1，其他应用可以同时读取 Channel 2，无需 BlackHole 或 Background Music。安装后若未出现两个输入设备，请重启 Mac 并刷新设备。
+
+转送不保存 WAV、不启动 ASR、不修改默认音频设备；它与 ASR/录音共享眼镜会话，并与实时提示的回答更新共用页面。桌面连接后默认开启两路，驱动安装与时长设置位于“设备与 API”，不再提供独立麦克风页面。设置、API 和当前验证范围见[内置虚拟麦克风说明](docs/virtual-microphone.md)。
 
 ### 响应含义
 

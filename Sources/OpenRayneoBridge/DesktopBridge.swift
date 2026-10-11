@@ -14,6 +14,7 @@ struct PairedGlasses: Identifiable, Sendable {
 
 enum DesktopSession: String {
     case navigation, video, captions, prompts, teleprompter, asr, recording
+    var isAudio: Bool { self == .asr || self == .recording || self == .prompts }
     var stopPath: String {
         switch self {
         case .navigation, .video, .captions: return "/v1/captions/stop"
@@ -61,6 +62,13 @@ final class DesktopBridge: ObservableObject {
     }
     @Published private(set) var transcript = ""
     @Published private(set) var audioSeconds = 0.0
+    @Published private(set) var virtualAudioDevices: [VirtualAudioDevice] = []
+    @Published private(set) var virtualMicrophoneName: String?
+    @Published private(set) var microphoneForwarding = false
+    @Published var microphoneDuration = 3_600
+    var builtInMicrophonesReady: Bool {
+        VirtualMicrophone.builtInDeviceUIDs.allSatisfy { uid in virtualAudioDevices.contains { $0.id == uid } }
+    }
     @Published private(set) var recordingPath: String?
     @Published private(set) var recordingFinalized = false
     @Published private(set) var apiAddress = ""
@@ -149,6 +157,7 @@ final class DesktopBridge: ObservableObject {
             self.pairingActive = false
             self.notice = "配对完成，正在连接并启用 API…"
             try await self.ensureConnected()
+            try await self.startDefaultPromptIfIdle()
             self.notice = "配对、连接已完成，本机 API 已就绪。"
         }
     }
@@ -158,7 +167,12 @@ final class DesktopBridge: ObservableObject {
         operation?.cancel()
     }
 
-    func connect() { perform("正在连接眼镜…") { try await self.ensureConnected() } }
+    func connect() {
+        perform("正在连接眼镜…") {
+            try await self.ensureConnected()
+            try await self.startDefaultPromptIfIdle()
+        }
+    }
 
     func disconnect() {
         Task { if await shutdown() { notice = "已断开，后台服务已停止。" } }
@@ -172,6 +186,7 @@ final class DesktopBridge: ObservableObject {
             guard await shutdown() else { return }
             perform("正在重新启动连接服务…") {
                 try await self.ensureConnected()
+                try await self.startDefaultPromptIfIdle()
                 self.notice = "连接服务已重启，API 已就绪。请使用当前显示的地址与令牌。"
             }
         }
@@ -336,6 +351,26 @@ final class DesktopBridge: ObservableObject {
         }
     }
 
+    func refreshVirtualAudioDevices() {
+        do {
+            virtualAudioDevices = try VirtualMicrophone.availableDevices()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func openVirtualMicrophoneInstaller() {
+        guard let installer = Bundle.main.url(forResource: "OpenRayneoAudio", withExtension: "pkg") else {
+            errorMessage = "未找到内置驱动安装包，请使用 scripts/build-app.sh 重新构建应用。"
+            return
+        }
+        if NSWorkspace.shared.open(installer) {
+            notice = "请在系统安装器中完成内置驱动安装。返回后刷新设备；若未出现两路麦克风，请重新启动 Mac。"
+        } else { errorMessage = "无法打开内置驱动安装包。" }
+    }
+
+    func openSoundSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension") { NSWorkspace.shared.open(url) }
+    }
+
     func stopSession() {
         perform("正在结束当前功能…") {
             try await self.stopCurrent()
@@ -479,12 +514,19 @@ final class DesktopBridge: ObservableObject {
         let prefix = mode == .prompts ? "/v1/prompts" : "/v1/captions"
         let font = mode == .video ? 1 : 2
         let lines = mode == .video ? 7 : 5
-        let response = try await request(prefix + "/start", body: ["font_size": font, "content_width": 100, "max_lines": lines])
+        var body: [String: Any] = ["font_size": font, "content_width": 100, "max_lines": lines]
+        if mode == .prompts {
+            refreshVirtualAudioDevices()
+            body["microphone_enabled"] = builtInMicrophonesReady
+            body["duration"] = microphoneDuration
+        }
+        let response = try await request(prefix + "/start", body: body)
         guard response["accepted"] as? Bool == true else {
             _ = try? await request(prefix + "/stop", body: [:], timeout: 5)
             throw DesktopError(message: "未收到眼镜的显示启动确认，请重试。")
         }
         activeSession = mode
+        if mode == .prompts { updateAudio(response) }
         if mode == .navigation || mode == .video {
             let config = (response["reply"] as? [String: Any])?["effective_config"] as? [String: Any]
             guard config?["font_size"] as? Int == font, config?["max_lines"] as? Int == lines, config?["content_width"] as? Int == 100 else {
@@ -495,11 +537,19 @@ final class DesktopBridge: ObservableObject {
         try await Task.sleep(nanoseconds: 500_000_000)
     }
 
+    private func startDefaultPromptIfIdle() async throws {
+        guard activeSession == nil else { return }
+        try await prepareDisplay(.prompts, reopen: false)
+        notice = microphoneForwarding
+            ? "眼镜已连接，两路麦克风已开启；可以同时发送问题与回答。"
+            : "眼镜已连接，可发送问题与回答。安装内置驱动后，重新打开实时提示即可转送两路麦克风。"
+    }
+
     private func stopCurrent() async throws {
         await cancelVideoPlayback()
         guard let current = activeSession else { return }
         let result = try await request(current.stopPath, body: [:])
-        if current == .asr || current == .recording { updateAudio(result) }
+        if current.isAudio { updateAudio(result) }
         activeSession = nil
     }
 
@@ -525,6 +575,7 @@ final class DesktopBridge: ObservableObject {
         guard service?.isRunning != true else { throw DesktopError(message: "旧连接服务尚未退出，未启动新进程。") }
         guard !selectedAddress.isEmpty else { throw DesktopError(message: "请先点击“添加并配对眼镜”，或刷新已配对设备列表。") }
         activeSession = nil
+        microphoneForwarding = false
         apiVerifiedAt = nil
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         monitor?.cancel()
@@ -558,6 +609,7 @@ final class DesktopBridge: ObservableObject {
                 self.serviceRunning = false
                 self.serviceProcessID = nil
                 self.activeSession = nil
+                self.microphoneForwarding = false
                 self.videoPlayback?.cancel()
                 self.apiVerifiedAt = nil
                 self.phase = "后台服务已退出"
@@ -605,7 +657,7 @@ final class DesktopBridge: ObservableObject {
                     phase = connected ? "已连接" : ble["bluetoothState"] as? Int == 0 ? "等待系统蓝牙就绪" : names[rawPhase] ?? "连接阶段：\(rawPhase)"
                     if let bytes = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]) { diagnostics = String(decoding: bytes, as: UTF8.self) }
                 } else if !Task.isCancelled { connected = false; apiVerifiedAt = nil; phase = "后台服务暂时无响应" }
-                if activeSession == .asr || activeSession == .recording,
+                if activeSession == .asr || activeSession == .recording || (activeSession == .prompts && microphoneForwarding),
                    let audio = try? await request("/v1/asr", method: "GET", timeout: 2) {
                     guard !Task.isCancelled else { return }
                     updateAudio(audio)
@@ -622,9 +674,15 @@ final class DesktopBridge: ObservableObject {
     private func updateAudio(_ data: [String: Any]) {
         transcript = data["transcript"] as? String ?? ""
         audioSeconds = data["decodedSeconds"] as? Double ?? 0
+        let microphones = data["virtualMicrophones"] as? [[String: Any]] ?? []
+        microphoneForwarding = data["running"] as? Bool == true && data["engine"] as? String == "virtual-microphone"
+        virtualMicrophoneName = microphones.compactMap { $0["deviceName"] as? String }.joined(separator: "、")
         if let recording = data["recording"] as? [String: Any] {
             recordingPath = recording["path"] as? String
             recordingFinalized = recording["finalized"] as? Bool == true
+        } else {
+            recordingPath = nil
+            recordingFinalized = false
         }
         if let error = data["error"] as? String { errorMessage = error }
     }
@@ -648,7 +706,7 @@ final class DesktopBridge: ObservableObject {
         monitor = nil
         if let child = service, child.isRunning {
             if let current = activeSession {
-                if let result = try? await request(current.stopPath, body: [:], timeout: 5), current == .asr || current == .recording { updateAudio(result) }
+                if let result = try? await request(current.stopPath, body: [:], timeout: 5), current.isAudio { updateAudio(result) }
             }
             // Also catches a start request completed by the server after client cancellation.
             if let result = try? await request("/v1/asr/stop", body: [:], timeout: 3) { updateAudio(result) }
@@ -669,6 +727,7 @@ final class DesktopBridge: ObservableObject {
         apiVerifiedAt = nil
         serviceRunning = false
         activeSession = nil
+        microphoneForwarding = false
         phase = "已断开"
         busy = false
         apiAddress = ""

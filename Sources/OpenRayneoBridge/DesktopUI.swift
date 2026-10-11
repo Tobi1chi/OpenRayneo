@@ -33,7 +33,7 @@ private struct DesktopControlView: View {
     @State private var alignVideoUpdates = true
     @State private var caption = "你好，OpenRayneo。\n这段文字来自 Mac 控制面板。"
     @State private var answer = ""
-    @State private var usePrompt = false
+    @State private var usePrompt = true
     @State private var notificationTitle = "OpenRayneo"
     @State private var notificationBody = "来自 Mac 的通知"
     @State private var scriptTitle = "我的提词稿"
@@ -122,6 +122,11 @@ private struct DesktopControlView: View {
                         .buttonStyle(.borderedProminent).disabled(bridge.selectedAddress.isEmpty || unavailable)
                 }
             }
+            if bridge.microphoneForwarding {
+                Label("两路麦克风已开启", systemImage: "mic.fill").font(.caption)
+                Text(String(format: "已接收 %.1f 秒音频", bridge.audioSeconds))
+                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            }
             Divider()
             ForEach(ControlPage.allCases) { item in
                 Button { page = item } label: {
@@ -164,6 +169,8 @@ private struct DesktopControlView: View {
             .disabled(bridge.selectedAddress.isEmpty || bridge.stopping || bridge.restartingService || bridge.pairingActive || bridge.refreshingDevices)
             Text("连接卡住时可重启服务，窗口保持打开、系统配对保留。当前显示或录音会话会结束，API 地址和令牌可能更新。")
                 .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            microphoneSettings
             Divider()
             setupStep(number: 3, title: "本机 API", complete: bridge.apiReady,
                       detail: bridge.apiReady ? "健康检查和带令牌的设备查询已通过。" : bridge.serviceRunning ? "服务已启动，正在等待眼镜连接或 API 检查。" : "连接完成后，即可复制地址与调用命令。")
@@ -239,7 +246,7 @@ private struct DesktopControlView: View {
             if usePrompt {
                 Text("回答正文").font(.headline)
                 editor($answer, height: 120)
-                Text("实时提示页面会开启眼镜麦克风上行；这里不保存或识别音频。").font(.caption).foregroundStyle(.secondary)
+                Text(bridge.builtInMicrophonesReady ? "实时提示默认同时转送两路麦克风，更新回答不会中断音频。" : "安装内置驱动后，实时提示会同时转送两路麦克风。").font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Button("发送到眼镜", systemImage: "paperplane") { bridge.showText(caption, translation: answer, prompt: usePrompt) }
@@ -327,7 +334,7 @@ private struct DesktopControlView: View {
     private var audioPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("直接使用眼镜麦克风").font(.headline)
-            Text("本地识别中文或英文；录音保存为双声道 WAV。需安装 libopus（brew install opus）。")
+            Text("本地识别中文或英文；录音保存为双声道 WAV。开始后会替换当前实时提示会话。")
                 .font(.callout).foregroundStyle(.secondary)
             HStack(spacing: 24) {
                 Picker("识别语言", selection: $locale) { Text("中文").tag("zh-CN"); Text("English").tag("en-US") }.frame(width: 200)
@@ -338,8 +345,8 @@ private struct DesktopControlView: View {
                 Button("开始语音识别", systemImage: "waveform") { bridge.startAudio(recognize: true, record: saveAudio, duration: audioDuration, locale: locale) }
                     .buttonStyle(.borderedProminent)
                 Button("仅录音", systemImage: "record.circle") { bridge.startAudio(recognize: false, record: true, duration: audioDuration, locale: locale) }
-            }.disabled(unavailable || bridge.selectedAddress.isEmpty || bridge.activeSession == .asr || bridge.activeSession == .recording)
-            if bridge.activeSession == .asr || bridge.activeSession == .recording || bridge.audioSeconds > 0 {
+            }.disabled(unavailable || bridge.selectedAddress.isEmpty || (bridge.activeSession == .asr || bridge.activeSession == .recording))
+            if bridge.activeSession?.isAudio == true || bridge.audioSeconds > 0 {
                 Text(String(format: "已接收 %.1f 秒音频", bridge.audioSeconds)).monospacedDigit()
             }
             if !bridge.transcript.isEmpty {
@@ -359,6 +366,37 @@ private struct DesktopControlView: View {
             Text("声道 1：骨传导麦，采集自己。声道 2：前向麦，采集他人。当前 ASR 混合识别两路声音。")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    private var microphoneSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("眼镜麦克风").font(.headline)
+            Text("连接后默认开启两路麦克风，并进入实时提示页；问题与回答可同时显示。")
+                .font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Label(bridge.builtInMicrophonesReady ? "两路内置麦克风已就绪" : "尚未安装内置麦克风", systemImage: bridge.builtInMicrophonesReady ? "checkmark.circle" : "mic")
+                Button("刷新设备") { bridge.refreshVirtualAudioDevices() }
+                    .disabled(unavailable || bridge.microphoneForwarding)
+                Button(bridge.builtInMicrophonesReady ? "重新安装驱动…" : "安装内置驱动…") {
+                    bridge.openVirtualMicrophoneInstaller()
+                }.disabled(unavailable || bridge.activeSession?.isAudio == true)
+            }
+            Picker("麦克风自动停止", selection: $bridge.microphoneDuration) {
+                Text("10 分钟").tag(600)
+                Text("1 小时").tag(3_600)
+                Text("6 小时").tag(21_600)
+            }.frame(width: 280).disabled(bridge.microphoneForwarding)
+            Text("OpenRayneo Microphone Channel 1：自己的声音；Channel 2：前方声音。")
+                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            HStack {
+                Button("打开声音设置") { bridge.openSoundSettings() }
+                if bridge.microphoneForwarding {
+                    Text("正在转送两路声音").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Text("首次安装需管理员授权，安装后刷新设备并重新打开实时提示。转送不保存录音、不启动语音识别；切换到字幕、视频或提词器会暂停转送。点击“结束当前功能”可停止。")
+                .font(.caption).foregroundStyle(.secondary)
+        }.onAppear { bridge.refreshVirtualAudioDevices() }
     }
 
     private var connectionHelp: some View {

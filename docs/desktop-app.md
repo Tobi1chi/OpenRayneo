@@ -51,6 +51,8 @@ Without a suitable identity, the script falls back to ad-hoc signing and prints 
 
 ## Controls
 
+**设备与 API** contains the microphone driver installer and automatic-stop setting. Connecting opens a real-time prompt session and starts both built-in mono microphones by default; there is no separate virtual microphone page. **文字显示** defaults to real-time prompts and updates questions/answers within the same session without interrupting audio. Channel 1 carries wearer audio; Channel 2 carries forward-facing audio. Install the driver once with the macOS Installer, refresh devices (restart the Mac if needed), then select the desired input in Codex or another app. The app bundles its Opus decoder, and end/disconnect/quit controls stop both forwarding engines. See [driver setup, API, and validation limits](virtual-microphone.md).
+
 | Page | Available actions |
 | --- | --- |
 | 设备与 API | Pair a new device, connect an existing one, restart its independent connection service, check API readiness, and copy integration details |
@@ -65,7 +67,7 @@ The navigation renderer uses `final: true`. First-row alignment is automatic: th
 
 Switching display features stops the previous app-tracked session first. **结束当前功能** exits the tracked session. If you manually exit on the glasses, **重新打开显示** explicitly restarts the caption/prompt page because the current protocol does not reliably synchronize that manual exit back to the client. Successful sends indicate transmission; confirm visible rendering on the glasses.
 
-Real-time prompts activate glasses audio uplink. The ordinary text panel does not save or recognize that audio. ASR/recording starts only through the audio controls; the existing [Opus and local speech requirements](asr.md) still apply. Finalized recordings can be revealed in Finder or opened in the default audio player.
+Real-time prompts activate glasses audio uplink. The prompt text panel forwards both channels through the installed driver by default, without saving or recognizing audio. If the driver is missing, the GUI uses a text-only prompt and displays installation guidance; reopen the prompt after installation. ASR/recording starts only through the audio controls; the existing [Opus and local speech requirements](asr.md) still apply. Finalized recordings can be revealed in Finder or opened in the default audio player.
 
 Weather, todos, and LifeLog diagnostics remain available through the HTTP API; they are not included in this first desktop panel. Avoid concurrent external display/audio control while using the GUI: its selected session reflects actions taken in this window.
 

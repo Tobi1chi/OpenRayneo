@@ -6,7 +6,7 @@ OpenRayneo can receive microphone audio from the glasses, decode it on the Mac, 
 
 - The usual Bluetooth pairing and bridge build requirements.
 - Apple's on-device speech recognition available for the requested locale. `zh-CN` is the default; recognition availability depends on the installed macOS language assets.
-- A local `libopus` installation: `brew install opus`. The bridge checks the standard Apple Silicon and Intel Homebrew paths, or `OPENRAYNEO_OPUS_LIBRARY` for an explicit dylib path. Non-ASR display endpoints do not require this library.
+- An Opus decoder: the packaged app includes `Contents/Frameworks/libopus.dylib`. A standalone Swift executable or source packaging needs a local installation: `brew install opus`. The bridge checks the standard Apple Silicon and Intel Homebrew paths, or `OPENRAYNEO_OPUS_LIBRARY` for an explicit dylib path. Non-ASR display endpoints do not require this library.
 - macOS Speech Recognition permission for OpenRayneo Bridge. Local microphone permission is not requested because the source is Bluetooth protocol audio.
 
 Build the application and launch it through Launch Services so privacy requests are attributed to the app, rather than the terminal or coding application that launches the executable:

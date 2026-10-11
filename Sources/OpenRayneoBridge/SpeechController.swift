@@ -24,13 +24,14 @@ private final class OpusDecoder {
         format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate), channels: AVAudioChannelCount(channels), interleaved: false)!
         maxFrames = sampleRate * 120 / 1000
         let paths = [ProcessInfo.processInfo.environment["OPENRAYNEO_OPUS_LIBRARY"],
+                     Bundle.main.privateFrameworksPath.map { $0 + "/libopus.dylib" },
                      "/opt/homebrew/opt/opus/lib/libopus.dylib", "/usr/local/opt/opus/lib/libopus.dylib"].compactMap { $0 }
         var loadedLibrary: UnsafeMutableRawPointer?
         for path in paths {
             if let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) { loadedLibrary = handle; break }
         }
         guard let library = loadedLibrary else {
-            throw BridgeError(status: 503, message: "ASR requires libopus: brew install opus, or set OPENRAYNEO_OPUS_LIBRARY")
+            throw BridgeError(status: 503, message: "Glasses audio requires libopus: brew install opus, or set OPENRAYNEO_OPUS_LIBRARY")
         }
         guard let createSymbol = dlsym(library, "opus_decoder_create"),
               let decodeSymbol = dlsym(library, "opus_decode"),
@@ -77,7 +78,7 @@ private final class OpusDecoder {
     }
 }
 
-/// A bounded, local-only glasses audio -> speech -> display pipeline.
+/// Owns one glasses audio session for recognition, recording, or microphone output.
 final class SpeechController {
     private let transport: RFCOMMTransport
     private let displays: DisplayController
@@ -88,8 +89,9 @@ final class SpeechController {
     private var running = false
     private var sid: String?
     private var decoder: OpusDecoder?
-    private var recordingDecoder: OpusDecoder?
+    private var stereoDecoder: OpusDecoder?
     private var recording: WAVRecording?
+    private var virtualMicrophones: [VirtualMicrophone] = []
     private var recognitionEnabled = false
     private var encodedChannelCounts: [String: Int] = [:]
     private var lastAudioSequence: Int?
@@ -119,7 +121,29 @@ final class SpeechController {
     }
 
     func route(method: String, path: String, body: [String: Any]) throws -> (Int, [String: Any])? {
-        guard path == "/v1/asr" || path.hasPrefix("/v1/asr/") || path == "/v1/recording" || path.hasPrefix("/v1/recording/") else { return nil }
+        if method == "POST", path.hasPrefix("/v1/prompts/") {
+            return try queue.sync {
+                switch path {
+                case "/v1/prompts/start" where body["microphone_enabled"] as? Bool ?? true:
+                    try start(locale: "zh-CN", duration: body["duration"] as? Int ?? 3_600,
+                              recognize: false, record: false, forwardMicrophones: true)
+                    var response = status()
+                    response["accepted"] = true
+                    return (200, response)
+                case "/v1/prompts/text" where running && !virtualMicrophones.isEmpty:
+                    return try displays.route(method: method, path: path, body: body, forSpeech: true)
+                case "/v1/prompts/stop" where running && !virtualMicrophones.isEmpty:
+                    stop()
+                    return (200, status())
+                default:
+                    return nil
+                }
+            }
+        }
+        guard path == "/v1/asr" || path.hasPrefix("/v1/asr/") || path == "/v1/recording" || path.hasPrefix("/v1/recording/") || path == "/v1/virtual-mic" || path.hasPrefix("/v1/virtual-mic/") else { return nil }
+        if method == "GET", path == "/v1/virtual-mic/devices" {
+            return (200, ["devices": try VirtualMicrophone.availableDevices().map { $0.json }])
+        }
         if method == "POST", path == "/v1/asr/authorize" {
             let completed = DispatchSemaphore(value: 0)
             SFSpeechRecognizer.requestAuthorization { _ in completed.signal() }
@@ -130,7 +154,7 @@ final class SpeechController {
         }
         return try queue.sync {
             switch (method, path) {
-            case ("GET", "/v1/asr"), ("GET", "/v1/recording"):
+            case ("GET", "/v1/asr"), ("GET", "/v1/recording"), ("GET", "/v1/virtual-mic"):
                 return (200, status())
             case ("POST", "/v1/asr/start"):
                 try start(locale: body["locale"] as? String ?? "zh-CN", duration: body["duration"] as? Int ?? 120, recognize: true, record: body["record"] as? Bool ?? false)
@@ -138,7 +162,12 @@ final class SpeechController {
             case ("POST", "/v1/recording/start"):
                 try start(locale: "zh-CN", duration: body["duration"] as? Int ?? 300, recognize: false, record: true)
                 return (200, status())
-            case ("POST", "/v1/asr/stop"), ("POST", "/v1/recording/stop"):
+            case ("POST", "/v1/virtual-mic/start"):
+                try start(locale: "zh-CN", duration: body["duration"] as? Int ?? 3_600, recognize: false,
+                          record: false, virtualDeviceUID: body["deviceUID"] as? String,
+                          channel: body["channel"] as? Int ?? 1, forwardMicrophones: true)
+                return (200, status())
+            case ("POST", "/v1/asr/stop"), ("POST", "/v1/recording/stop"), ("POST", "/v1/virtual-mic/stop"):
                 stop()
                 return (200, status())
             default:
@@ -151,18 +180,21 @@ final class SpeechController {
         pendingLock.lock()
         let dropped = overflowPackets
         pendingLock.unlock()
-        return ["running": running, "source": "glasses", "engine": recognitionEnabled ? "apple-on-device" : "recording-only",
+        return ["running": running, "source": "glasses", "engine": !virtualMicrophones.isEmpty ? "virtual-microphone" : recognitionEnabled ? "apple-on-device" : "recording-only",
                 "locale": locale, "speechAuthorization": SFSpeechRecognizer.authorizationStatus().rawValue,
                 "sid": sid as Any? ?? NSNull(), "audioPackets": audioPackets,
                 "decodedSeconds": decodedSeconds, "decodeErrors": decodeErrors,
                 "encodedChannelCounts": encodedChannelCounts, "missingAudioPackets": missingAudioPackets,
                 "recording": recording?.status as Any? ?? NSNull(),
+                "virtualMicrophone": virtualMicrophones.first?.status as Any? ?? NSNull(),
+                "virtualMicrophones": virtualMicrophones.map { $0.status },
                 "droppedAudioPackets": dropped, "audioRMS": level,
                 "transcript": transcript, "displayedText": displayedText,
                 "error": error as Any? ?? NSNull()]
     }
 
-    private func start(locale: String, duration: Int, recognize: Bool, record: Bool) throws {
+    private func start(locale: String, duration: Int, recognize: Bool, record: Bool,
+                       virtualDeviceUID: String? = nil, channel: Int = 1, forwardMicrophones: Bool = false) throws {
         guard !running else { throw BridgeError(status: 409, message: "An audio session is already running") }
         let limit = recognize ? 600 : 21_600
         guard (10...limit).contains(duration) else { throw BridgeError(status: 400, message: "duration must be between 10 and \(limit) seconds") }
@@ -177,15 +209,25 @@ final class SpeechController {
             }
         }
         let decoder = recognize ? try OpusDecoder() : nil
-        let recordingDecoder = record ? try OpusDecoder(sampleRate: 48_000, channels: 2) : nil
-        let sid = try displays.startSpeechDisplay()
+        let stereoDecoder = record || forwardMicrophones ? try OpusDecoder(sampleRate: 48_000, channels: 2) : nil
+        let microphones: [VirtualMicrophone]
+        if forwardMicrophones {
+            microphones = try virtualDeviceUID.map { [try VirtualMicrophone(deviceUID: $0, channel: channel)] }
+                ?? VirtualMicrophone.builtInPair()
+        } else { microphones = [] }
+        do { for microphone in microphones { try microphone.start() } }
+        catch { microphones.forEach { $0.stop() }; throw error }
+        let sid: String
+        do { sid = try displays.startSpeechDisplay() }
+        catch { microphones.forEach { $0.stop() }; throw error }
         let recording: WAVRecording?
         do { recording = record ? try WAVRecording() : nil }
-        catch { try? displays.stopSpeechDisplay(); throw error }
+        catch { microphones.forEach { $0.stop() }; try? displays.stopSpeechDisplay(); throw error }
         self.recognizer = recognizer
         self.decoder = decoder
-        self.recordingDecoder = recordingDecoder
+        self.stereoDecoder = stereoDecoder
         self.recording = recording
+        self.virtualMicrophones = microphones
         recognitionEnabled = recognize
         self.sid = sid
         self.locale = locale
@@ -272,15 +314,20 @@ final class SpeechController {
         let mono: AVAudioPCMBuffer?
         let stereo: AVAudioPCMBuffer?
         do {
+            if !virtualMicrophones.isEmpty, stereoDecoder?.encodedChannels(audio) != 2 {
+                error = "Wearer/forward microphone selection requires stereo glasses audio"
+                stop()
+                return
+            }
             mono = try decoder?.decode(audio)
-            stereo = try recordingDecoder?.decode(audio)
+            stereo = try stereoDecoder?.decode(audio)
             guard let buffer = mono ?? stereo else { return }
-            if let channels = (recordingDecoder ?? decoder)?.encodedChannels(audio) {
+            if let channels = (stereoDecoder ?? decoder)?.encodedChannels(audio) {
                 encodedChannelCounts[String(channels), default: 0] += 1
             }
             consecutiveDecodeErrors = 0
             decodedSeconds += Double(buffer.frameLength) / buffer.format.sampleRate
-            let samples = buffer.floatChannelData![0]
+            let samples = buffer.floatChannelData![(virtualMicrophones.first?.channel ?? 1) - 1]
             var squareSum: Float = 0
             for i in 0..<Int(buffer.frameLength) { squareSum += samples[i] * samples[i] }
             level = sqrt(squareSum / Float(buffer.frameLength))
@@ -294,6 +341,7 @@ final class SpeechController {
             return
         }
         if let stereo {
+            virtualMicrophones.forEach { $0.append(stereo) }
             do { try recording?.append(stereo) }
             catch {
                 self.error = "WAV write failed: \((error as? BridgeError)?.message ?? error.localizedDescription)"
@@ -306,6 +354,11 @@ final class SpeechController {
 
     private func tick() {
         guard running else { return }
+        if let failure = virtualMicrophones.compactMap({ $0.failure }).first {
+            error = failure
+            stop()
+            return
+        }
         if Date() >= deadline { stop(); return }
         if Date().timeIntervalSince(lastAudioAt) > 10 {
             error = "No glasses audio received for 10 seconds"
@@ -340,8 +393,9 @@ final class SpeechController {
         task = nil
         request = nil
         decoder = nil
-        recordingDecoder = nil
+        stereoDecoder = nil
         recognizer = nil
+        virtualMicrophones.forEach { $0.stop() }
         do { try recording?.finish() }
         catch { self.error = (self.error.map { $0 + "; " } ?? "") + "WAV finalization failed: \(error.localizedDescription)" }
         do { try displays.stopSpeechDisplay() }
