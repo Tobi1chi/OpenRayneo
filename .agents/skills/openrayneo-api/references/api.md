@@ -124,14 +124,14 @@ App 的“虚拟麦克风”页面提供内置驱动安装包，安装由系统�
 
 旧的显式 `{"deviceUID":"已安装的回环设备 uid","channel":1}` 请求保留为单路兼容模式，channel 可选 1 或 2；它不会同时启动内置两路。
 
-ASR、录音和转送共享一个独占会话，任一 stop 均会结束该会话。仅在用户要求时启动，先结束自己拥有的显示/音频会话，记录模式和 SID。用 `POST /v1/virtual-mic/stop` 结束自己启动的转送；检查顶层 `running:false`、两路引擎 `running:false`、`error:null`，重复 stop 安全。转送与 `/v1/prompts/text` 共用实时提示页，可持续更新完整回答；独立字幕、提词器与 ASR/录音仍互斥；单声道眼镜音频无法分离来源，会报错停止。
+ASR、录音和转送共享一个独占会话，任一 stop 均会结束该会话。仅在用户要求时启动，先结束自己拥有的显示/音频会话，记录模式和 SID。用 `POST /v1/virtual-mic/stop` 结束自己启动的转送；检查顶层 `running:false`、两路引擎 `running:false`、`error:null`，重复 stop 安全。转送与 `/v1/prompts/text` 共用实时提示页，可持续更新完整回答；短暂无音频或输出重配会保留页面，状态 `audioState` 为 `waiting`/`recovering`；`POST /v1/virtual-mic/recover` 在同一 SID 内重试输出并重置解码器；独立字幕、提词器与 ASR/录音仍互斥；单声道眼镜音频无法分离来源，会报错但保留实时麦克风页面，不伪造两路来源。
 
 ## 全天智记诊断（仅按要求使用）
 
-1. `POST /v1/lifelog/observe`，`{"duration":60}`，支持 10–600 秒，默认 300。
+1. `POST /v1/lifelog/observe`，`{"duration":60}`，支持 10–600 秒，默认 300。可加 `inspect_audio:true` 查看分帧解码和真实声道统计；用户要求保存回放时加 `record:true`，生成有限时长的单声道 WAV。两个选项默认关闭。
 2. 用户要求启用时 `POST /v1/lifelog/switch`，`{"enabled":true}`；observe 本身不是打开开关。
-3. `GET /v1/lifelog` 读取事件与计数。观察器会自动回应唤醒，并接收、计数和丢弃音频；不是纯被动抓包。
+3. `GET /v1/lifelog` 读取事件与计数。观察器会自动回应唤醒；默认只计数并丢弃音频，开启检查/录音选项时进行分帧解码。`audioInspection` 包含解码计数、RMS，以及可选 `recording`/`recordingError`。
 4. 只有需要强制一轮音频请求时调用 `POST /v1/lifelog/record`；此名字不表示保存 WAV。
 5. `POST /v1/lifelog/stop` 清理；检查 `observing:false`、`enabledByProbe:false` 和 `error`。若开关关闭未确认，应告知用户核对眼镜状态。
 
-此路径会独占音频/显示控制。它不解码保存全天录音，不导出缓存，不提供 ASR。状态标志常驻只表示功能已开启，是否在录音看事件流。LifeLog 与 Proactive AI 的双通道结论需分别实测。
+此路径会独占音频/显示控制。它只支持有限观察与可选 WAV，不导出缓存、不提供 ASR。保存录音后检查 `audioInspection.recording.finalized:true` 和 `recordingError:null` 再交付文件。实测全天智记的 1539 帧均为单声道，不能据此替换两路独立麦克风。状态标志常驻只表示功能已开启，是否在录音看事件流。LifeLog 与 Proactive AI 的双通道结论需分别实测。

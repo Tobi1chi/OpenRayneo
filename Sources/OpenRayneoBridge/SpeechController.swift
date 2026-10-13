@@ -7,7 +7,7 @@ import Foundation
 import Speech
 
 /// Optional runtime dependency: the normal display bridge works without libopus.
-private final class OpusDecoder {
+final class OpusDecoder {
     private typealias Create = @convention(c) (Int32, Int32, UnsafeMutablePointer<Int32>?) -> OpaquePointer?
     private typealias Decode = @convention(c) (OpaquePointer?, UnsafePointer<UInt8>?, Int32, UnsafeMutablePointer<Int16>?, Int32, Int32) -> Int32
     private typealias Destroy = @convention(c) (OpaquePointer?) -> Void
@@ -75,6 +75,75 @@ private final class OpusDecoder {
             }
         }
         return buffer
+    }
+}
+
+/// Finite LifeLog experiments inspect audio and optionally save a mono WAV for playback.
+final class LifeLogAudioProbe {
+    private let queue = DispatchQueue(label: "openrayneo.lifelog-audio-probe")
+    private let pendingLock = NSLock()
+    private var pending = 0
+    private let decoder: OpusDecoder
+    private let recording: WAVRecording?
+    private var recordingError: String?
+    private var packets = 0
+    private var decodedSeconds = 0.0
+    private var channelCounts: [String: Int] = [:]
+    private var errors = 0
+    private var levels: [Float] = [0]
+
+    init(record: Bool = false) throws {
+        decoder = try OpusDecoder(sampleRate: 48_000, channels: 1)
+        recording = record ? try WAVRecording(sampleRate: 48_000, channels: 1) : nil
+    }
+
+    func consume(_ message: RemoteMessage) {
+        guard let audio = message.audioData, !audio.isEmpty else { return }
+        pendingLock.lock()
+        guard pending < 64 else { pendingLock.unlock(); return }
+        pending += 1
+        pendingLock.unlock()
+        queue.async {
+            defer { self.pendingLock.lock(); self.pending -= 1; self.pendingLock.unlock() }
+            let frames: [Data]
+            if let count = message.json?["frameCount"] as? Int {
+                frames = (0..<max(0, min(31, count, audio.count / 240))).map {
+                    audio.subdata(in: ($0 * 240)..<(($0 + 1) * 240))
+                }
+            } else { frames = [audio] }
+            for frame in frames {
+                let channels = self.decoder.encodedChannels(frame)
+                self.channelCounts[String(channels), default: 0] += 1
+                do {
+                    let pcm = try self.decoder.decode(frame)
+                    self.packets += 1
+                    self.decodedSeconds += Double(pcm.frameLength) / 48_000
+                    self.levels = (0..<Int(pcm.format.channelCount)).map { channel in
+                        var squares: Float = 0
+                        for index in 0..<Int(pcm.frameLength) {
+                            let value = pcm.floatChannelData![channel][index]
+                            squares += value * value
+                        }
+                        return sqrt(squares / Float(pcm.frameLength))
+                    }
+                    if self.recordingError == nil {
+                        do { try self.recording?.append(pcm) }
+                        catch { self.recordingError = (error as? BridgeError)?.message ?? error.localizedDescription }
+                    }
+                } catch { self.errors += 1 }
+            }
+        }
+    }
+
+    func finish() throws {
+        try queue.sync { try recording?.finish() }
+    }
+
+    var status: [String: Any] {
+        queue.sync { ["decodedPackets": packets, "decodedSeconds": decodedSeconds,
+                      "encodedChannelCounts": channelCounts, "decodeErrors": errors,
+                      "audioRMS": levels, "recording": recording?.status as Any? ?? NSNull(),
+                      "recordingError": recordingError as Any? ?? NSNull()] }
     }
 }
 
@@ -167,6 +236,15 @@ final class SpeechController {
                           record: false, virtualDeviceUID: body["deviceUID"] as? String,
                           channel: body["channel"] as? Int ?? 1, forwardMicrophones: true)
                 return (200, status())
+            case ("POST", "/v1/virtual-mic/recover"):
+                guard running, !virtualMicrophones.isEmpty else {
+                    throw BridgeError(status: 409, message: "Start the microphone session before recovering its outputs")
+                }
+                stereoDecoder = try OpusDecoder(sampleRate: 48_000, channels: 2)
+                consecutiveDecodeErrors = 0
+                error = nil
+                virtualMicrophones.forEach { $0.retryOutput() }
+                return (200, status())
             case ("POST", "/v1/asr/stop"), ("POST", "/v1/recording/stop"), ("POST", "/v1/virtual-mic/stop"):
                 stop()
                 return (200, status())
@@ -180,14 +258,20 @@ final class SpeechController {
         pendingLock.lock()
         let dropped = overflowPackets
         pendingLock.unlock()
-        return ["running": running, "source": "glasses", "engine": !virtualMicrophones.isEmpty ? "virtual-microphone" : recognitionEnabled ? "apple-on-device" : "recording-only",
+        let outputs = virtualMicrophones.map { $0.status }
+        let audioState: String
+        if !running { audioState = "stopped" }
+        else if outputs.contains(where: { $0["recovering"] as? Bool == true }) { audioState = "recovering" }
+        else if audioPackets == 0 || error != nil || Date().timeIntervalSince(lastAudioAt) > 10 { audioState = "waiting" }
+        else { audioState = "receiving" }
+        return ["running": running, "audioState": audioState, "source": "glasses", "engine": !virtualMicrophones.isEmpty ? "virtual-microphone" : recognitionEnabled ? "apple-on-device" : "recording-only",
                 "locale": locale, "speechAuthorization": SFSpeechRecognizer.authorizationStatus().rawValue,
                 "sid": sid as Any? ?? NSNull(), "audioPackets": audioPackets,
                 "decodedSeconds": decodedSeconds, "decodeErrors": decodeErrors,
                 "encodedChannelCounts": encodedChannelCounts, "missingAudioPackets": missingAudioPackets,
                 "recording": recording?.status as Any? ?? NSNull(),
-                "virtualMicrophone": virtualMicrophones.first?.status as Any? ?? NSNull(),
-                "virtualMicrophones": virtualMicrophones.map { $0.status },
+                "virtualMicrophone": outputs.first as Any? ?? NSNull(),
+                "virtualMicrophones": outputs,
                 "droppedAudioPackets": dropped, "audioRMS": level,
                 "transcript": transcript, "displayedText": displayedText,
                 "error": error as Any? ?? NSNull()]
@@ -215,8 +299,7 @@ final class SpeechController {
             microphones = try virtualDeviceUID.map { [try VirtualMicrophone(deviceUID: $0, channel: channel)] }
                 ?? VirtualMicrophone.builtInPair()
         } else { microphones = [] }
-        do { for microphone in microphones { try microphone.start() } }
-        catch { microphones.forEach { $0.stop() }; throw error }
+        microphones.forEach { $0.startWithRecovery() }
         let sid: String
         do { sid = try displays.startSpeechDisplay() }
         catch { microphones.forEach { $0.stop() }; throw error }
@@ -315,8 +398,8 @@ final class SpeechController {
         let stereo: AVAudioPCMBuffer?
         do {
             if !virtualMicrophones.isEmpty, stereoDecoder?.encodedChannels(audio) != 2 {
-                error = "Wearer/forward microphone selection requires stereo glasses audio"
-                stop()
+                error = "眼镜暂未提供双声道音频，麦克风页面已保留；可以重新进入麦克风模式。"
+                decodeErrors += 1
                 return
             }
             mono = try decoder?.decode(audio)
@@ -326,6 +409,7 @@ final class SpeechController {
                 encodedChannelCounts[String(channels), default: 0] += 1
             }
             consecutiveDecodeErrors = 0
+            if !virtualMicrophones.isEmpty { error = nil }
             decodedSeconds += Double(buffer.frameLength) / buffer.format.sampleRate
             let samples = buffer.floatChannelData![(virtualMicrophones.first?.channel ?? 1) - 1]
             var squareSum: Float = 0
@@ -336,7 +420,7 @@ final class SpeechController {
             consecutiveDecodeErrors += 1
             if consecutiveDecodeErrors >= 5 {
                 self.error = "Repeated Opus decoding failures"
-                stop()
+                if virtualMicrophones.isEmpty { stop() }
             }
             return
         }
@@ -354,13 +438,9 @@ final class SpeechController {
 
     private func tick() {
         guard running else { return }
-        if let failure = virtualMicrophones.compactMap({ $0.failure }).first {
-            error = failure
-            stop()
-            return
-        }
+        virtualMicrophones.forEach { $0.maintainOutput() }
         if Date() >= deadline { stop(); return }
-        if Date().timeIntervalSince(lastAudioAt) > 10 {
+        if virtualMicrophones.isEmpty, Date().timeIntervalSince(lastAudioAt) > 10 {
             error = "No glasses audio received for 10 seconds"
             stop()
             return

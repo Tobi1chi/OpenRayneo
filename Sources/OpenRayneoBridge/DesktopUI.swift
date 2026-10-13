@@ -42,6 +42,7 @@ private struct DesktopControlView: View {
     @State private var locale = "zh-CN"
     @State private var audioDuration = 60
     @State private var saveAudio = false
+    @State private var saveLifeLogAudio = true
 
     private var unavailable: Bool { bridge.busy || bridge.stopping }
 
@@ -122,8 +123,11 @@ private struct DesktopControlView: View {
                         .buttonStyle(.borderedProminent).disabled(bridge.selectedAddress.isEmpty || unavailable)
                 }
             }
+            Button(bridge.activeSession == .prompts ? "重新进入麦克风模式" : "进入麦克风模式", systemImage: "mic") {
+                bridge.enterMicrophoneMode()
+            }.disabled(unavailable || bridge.selectedAddress.isEmpty)
             if bridge.microphoneForwarding {
-                Label("两路麦克风已开启", systemImage: "mic.fill").font(.caption)
+                Label(bridge.microphoneRecovering ? "麦克风正在恢复" : bridge.microphoneAudioState == "waiting" ? "等待眼镜音频" : "两路麦克风已开启", systemImage: "mic.fill").font(.caption)
                 Text(String(format: "已接收 %.1f 秒音频", bridge.audioSeconds))
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
             }
@@ -363,6 +367,27 @@ private struct DesktopControlView: View {
                     }
                 }
             }
+            Divider()
+            Text("全天智记音频（实验）").font(.headline)
+            Text("按上方时长自动停止，可保存音频后回放。当前真机收到的是单声道，暂不替换两路虚拟麦克风；没有人声时可能不上传音频。")
+                .font(.callout).foregroundStyle(.secondary)
+            Toggle("保存单声道 WAV 用于回放", isOn: $saveLifeLogAudio)
+                .disabled(bridge.activeSession == .lifeLog)
+            HStack {
+                Button("开始全天智记采集") { bridge.startLifeLog(duration: audioDuration, record: saveLifeLogAudio) }
+                    .disabled(unavailable || bridge.selectedAddress.isEmpty || bridge.activeSession == .lifeLog)
+                Button("触发一轮音频") { bridge.triggerLifeLogAudio() }
+                    .disabled(unavailable || bridge.activeSession != .lifeLog)
+                Button("停止全天智记") { bridge.stopSession() }
+                    .disabled(unavailable || bridge.activeSession != .lifeLog)
+            }
+            if bridge.activeSession == .lifeLog || bridge.lifeLogSeconds > 0 {
+                Text(String(format: "已解码 %.1f 秒音频", bridge.lifeLogSeconds)).monospacedDigit()
+                Text(bridge.lifeLogChannels).font(.callout)
+                if bridge.lifeLogDecodeErrors > 0 {
+                    Text("解码失败：\(bridge.lifeLogDecodeErrors) 帧").foregroundStyle(.orange)
+                }
+            }
             Text("声道 1：骨传导麦，采集自己。声道 2：前向麦，采集他人。当前 ASR 混合识别两路声音。")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -390,11 +415,13 @@ private struct DesktopControlView: View {
                 .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             HStack {
                 Button("打开声音设置") { bridge.openSoundSettings() }
+                Button("恢复音频输出") { bridge.recoverMicrophoneOutput() }
+                    .disabled(unavailable || bridge.activeSession != .prompts || !bridge.microphoneForwarding)
                 if bridge.microphoneForwarding {
-                    Text("正在转送两路声音").font(.caption).foregroundStyle(.secondary)
+                    Text(bridge.microphoneRecovering ? "音频设备暂不可用，正在恢复" : bridge.microphoneAudioState == "waiting" ? "等待眼镜上传音频，页面保持开启" : "正在转送两路声音").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Text("首次安装需管理员授权，安装后刷新设备并重新打开实时提示。转送不保存录音、不启动语音识别；切换到字幕、视频或提词器会暂停转送。点击“结束当前功能”可停止。")
+            Text("进入失败或在眼镜上退出后，点击左侧“进入／重新进入麦克风模式”。切换系统声音设备会自动恢复输出，保留眼镜页面；也可手动恢复音频输出。转送不录音、不识别；切换到字幕、视频或提词器会暂停转送。达到自动停止时长或点击“结束当前功能”才正常结束。")
                 .font(.caption).foregroundStyle(.secondary)
         }.onAppear { bridge.refreshVirtualAudioDevices() }
     }

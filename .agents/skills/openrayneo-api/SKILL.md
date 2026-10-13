@@ -39,7 +39,7 @@ uv run python .agents/skills/openrayneo-api/scripts/request.py GET /v1/device
 | 保存眼镜声音 | `/v1/recording/*` |
 | 眼镜声音转文字并显示 | `/v1/asr/*` |
 | 用眼镜作为 Codex 或其他应用的麦克风 | `/v1/prompts/start` 默认同时转送 Channel 1/2，`/v1/prompts/text` 同时更新回答，`/v1/prompts/stop` 结束；设备与状态使用 `/v1/virtual-mic/devices`、`/v1/virtual-mic`，需安装 App 自带驱动 |
-| 全天智记协议实验 | `/v1/lifelog/*`；仅诊断，不提供全天 WAV 或缓存导出 |
+| 全天智记音频实验 | `/v1/lifelog/*`；有限观察、分帧检查或按要求保存单声道 WAV，不提供全天 WAV 或缓存导出 |
 
 一个通知例子（只在用户要求发送时执行）：
 

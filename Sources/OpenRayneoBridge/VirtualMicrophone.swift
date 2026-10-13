@@ -64,6 +64,14 @@ final class MicrophonePCMQueue {
         return available > 0
     }
 
+    func clear() {
+        lock.lock()
+        defer { lock.unlock() }
+        readIndex = 0
+        count = 0
+        primed = false
+    }
+
     var status: [String: Any] {
         lock.lock()
         defer { lock.unlock() }
@@ -85,11 +93,15 @@ final class VirtualMicrophone {
         return try builtInDeviceUIDs.enumerated().map { try VirtualMicrophone(deviceUID: $0.element, channel: $0.offset + 1) }
     }
 
-    let device: VirtualAudioDevice
+    private(set) var device: VirtualAudioDevice
     let channel: Int
-    private let engine = AVAudioEngine()
+    private var graph: AUGraph?
+    private var outputUnit: AudioUnit?
     private let pcm = MicrophonePCMQueue()
-    private var source: AVAudioSourceNode?
+    private var active = false
+    private var lastRecoveryAt = -Double.infinity
+    private var recoveryCount = 0
+    private var outputError: String?
     private var outputSampleRate = 0.0
 
     init(deviceUID: String, channel: Int) throws {
@@ -104,79 +116,166 @@ final class VirtualMicrophone {
     }
 
     func start() throws {
-        guard let unit = engine.outputNode.audioUnit else {
-            throw BridgeError(status: 503, message: "The audio output unit is unavailable")
+        stopOutput()
+        guard let target = try Self.availableDevices().first(where: { $0.id == device.id }) else {
+            throw BridgeError(status: 503, message: "Virtual microphone is unavailable: \(device.name)")
         }
-        var deviceID = device.deviceID
-        let result = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
-                                         kAudioUnitScope_Global, 0, &deviceID,
-                                         UInt32(MemoryLayout<AudioDeviceID>.size))
-        guard result == noErr else {
-            throw BridgeError(status: 503, message: "Could not select the virtual audio device: \(result)")
+        device = target
+        pcm.clear()
+        var created: AUGraph?
+        try check(NewAUGraph(&created), "create audio graph")
+        guard let graph = created else { throw BridgeError(status: 503, message: "Could not create audio graph") }
+        self.graph = graph
+        do {
+            var outputDescription = AudioComponentDescription(componentType: kAudioUnitType_Output,
+                componentSubType: kAudioUnitSubType_HALOutput, componentManufacturer: kAudioUnitManufacturer_Apple,
+                componentFlags: 0, componentFlagsMask: 0)
+            var mixerDescription = AudioComponentDescription(componentType: kAudioUnitType_Mixer,
+                componentSubType: kAudioUnitSubType_MultiChannelMixer, componentManufacturer: kAudioUnitManufacturer_Apple,
+                componentFlags: 0, componentFlagsMask: 0)
+            var outputNode: AUNode = 0
+            var mixerNode: AUNode = 0
+            try check(AUGraphAddNode(graph, &outputDescription, &outputNode), "add HAL output")
+            try check(AUGraphAddNode(graph, &mixerDescription, &mixerNode), "add PCM mixer")
+            try check(AUGraphOpen(graph), "open audio graph")
+            var output: AudioUnit?
+            var mixer: AudioUnit?
+            try check(AUGraphNodeInfo(graph, outputNode, nil, &output), "get HAL output")
+            try check(AUGraphNodeInfo(graph, mixerNode, nil, &mixer), "get PCM mixer")
+            guard let output, let mixer else { throw BridgeError(status: 503, message: "Audio graph units are unavailable") }
+            outputUnit = output
+            var enabled: UInt32 = 1
+            try set(output, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &enabled)
+            enabled = 0
+            try set(output, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enabled)
+            var deviceID = target.deviceID
+            try set(output, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &deviceID)
+            var stream = AudioStreamBasicDescription()
+            var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+            try check(AudioUnitGetProperty(output, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+                0, &stream, &size), "read device format")
+            guard let hardware = AVAudioFormat(standardFormatWithSampleRate: stream.mSampleRate,
+                                               channels: stream.mChannelsPerFrame) else {
+                throw BridgeError(status: 503, message: "Virtual microphone format is unavailable")
+            }
+            outputSampleRate = hardware.sampleRate
+            var sourceFormat = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
+                mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
+                mBytesPerPacket: 4, mFramesPerPacket: 1, mBytesPerFrame: 4, mChannelsPerFrame: 1,
+                mBitsPerChannel: 32, mReserved: 0)
+            var hardwareFormat = hardware.streamDescription.pointee
+            try set(mixer, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &sourceFormat, "set mixer source format")
+            try set(mixer, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &hardwareFormat, "set mixer output format")
+            try set(output, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &hardwareFormat, "set HAL client format")
+            try check(AudioUnitSetParameter(mixer, kMultiChannelMixerParam_Enable, kAudioUnitScope_Input, 0, 1, 0), "enable mixer input")
+            try check(AudioUnitSetParameter(mixer, kMultiChannelMixerParam_Volume, kAudioUnitScope_Input, 0, 1, 0), "set mixer input gain")
+            try check(AudioUnitSetParameter(mixer, kMultiChannelMixerParam_Volume, kAudioUnitScope_Output, 0, 1, 0), "set mixer output gain")
+            var callback = AURenderCallbackStruct(inputProc: { context, flags, _, _, frames, buffers in
+                guard let buffers else { return kAudio_ParamError }
+                let pcm = Unmanaged<MicrophonePCMQueue>.fromOpaque(context).takeUnretainedValue()
+                let output = UnsafeMutableAudioBufferListPointer(buffers)[0].mData!.assumingMemoryBound(to: Float.self)
+                if pcm.render(into: output, frames: Int(frames)) {
+                    flags.pointee.remove(.unitRenderAction_OutputIsSilence)
+                } else {
+                    flags.pointee.insert(.unitRenderAction_OutputIsSilence)
+                }
+                return noErr
+            }, inputProcRefCon: Unmanaged.passUnretained(pcm).toOpaque())
+            try set(mixer, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callback)
+            try check(AUGraphConnectNodeInput(graph, mixerNode, 0, outputNode, 0), "connect HAL output")
+            try check(AUGraphInitialize(graph), "initialize audio graph")
+            try check(AUGraphStart(graph), "start HAL output")
+            active = true
+            outputError = nil
+        } catch {
+            stopOutput()
+            throw error
         }
-        // AVAudioEngine's cached node format can still describe the old device.
-        var stream = AudioStreamBasicDescription()
-        var streamSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        guard AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
-                                   0, &stream, &streamSize) == noErr,
-              stream.mSampleRate > 0, stream.mChannelsPerFrame > 0,
-              let hardware = AVAudioFormat(standardFormatWithSampleRate: stream.mSampleRate, channels: stream.mChannelsPerFrame) else {
-            throw BridgeError(status: 503, message: "The virtual audio device has no usable output format")
-        }
-        outputSampleRate = stream.mSampleRate
-        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
-        let pcm = self.pcm
-        let source = AVAudioSourceNode(format: format) { silence, _, frames, buffers in
-            let list = UnsafeMutableAudioBufferListPointer(buffers)
-            let output = list[0].mData!.assumingMemoryBound(to: Float.self)
-            silence.pointee = ObjCBool(!pcm.render(into: output, frames: Int(frames)))
-            return noErr
-        }
-        self.source = source
-        engine.attach(source)
-        engine.connect(source, to: engine.mainMixerNode, format: format)
-        // The mixer converts 48 kHz mono to the selected device's rate/channels.
-        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: hardware)
-        do { try engine.start() }
-        catch {
-            stop()
-            throw BridgeError(status: 503, message: "Could not start virtual microphone output: \(error.localizedDescription)")
-        }
+    }
+
+    func startWithRecovery() {
+        active = true
+        lastRecoveryAt = ProcessInfo.processInfo.systemUptime
+        do { try start() }
+        catch { outputError = (error as? BridgeError)?.message ?? error.localizedDescription }
+    }
+
+    func retryOutput() {
+        guard active else { return }
+        lastRecoveryAt = -Double.infinity
+        maintainOutput()
     }
 
     func append(_ stereo: AVAudioPCMBuffer) {
         pcm.append(stereo, channel: channel - 1)
     }
 
-    var failure: String? {
-        if Self.uintProperty(device.deviceID, kAudioDevicePropertyDeviceIsAlive) != 1 || !engine.isRunning {
-            return "Virtual audio output stopped or the device was removed"
-        }
+    private var healthy: Bool {
+        guard let outputUnit, Self.uintProperty(device.deviceID, kAudioDevicePropertyDeviceIsAlive) == 1 else { return false }
         var current: AudioDeviceID = 0
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        guard let unit = engine.outputNode.audioUnit,
-              AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
-                                   0, &current, &size) == noErr, current == device.deviceID else {
-            return "Virtual audio output device changed; refresh devices and start again"
-        }
-        return nil
+        var running: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioUnitGetProperty(outputUnit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
+                                   0, &current, &size) == noErr, current == device.deviceID else { return false }
+        size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioUnitGetProperty(outputUnit, kAudioOutputUnitProperty_IsRunning, kAudioUnitScope_Global,
+                                    0, &running, &size) == noErr && running == 1
+    }
+
+    // Called on the speech queue, never from an audio callback. Keep the glasses
+    // session alive while resolving the same UID after a Core Audio reconfiguration.
+    func maintainOutput() {
+        guard active, !healthy else { return }
+        stopOutput()
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastRecoveryAt >= 1 else { return }
+        lastRecoveryAt = now
+        recoveryCount += 1
+        do { try start() }
+        catch { outputError = (error as? BridgeError)?.message ?? error.localizedDescription }
     }
 
     var status: [String: Any] {
+        let running = healthy
         var data = pcm.status
         data["deviceUID"] = device.id
         data["deviceName"] = device.name
         data["channel"] = channel
         data["sampleRate"] = 48_000
         data["outputSampleRate"] = outputSampleRate
-        data["running"] = engine.isRunning
+        data["running"] = running
+        data["recovering"] = active && !running
+        data["recoveryCount"] = recoveryCount
+        data["error"] = outputError as Any? ?? NSNull()
         return data
     }
 
     func stop() {
-        engine.stop()
-        if let source { engine.detach(source) }
-        source = nil
+        active = false
+        stopOutput()
+        pcm.clear()
+    }
+
+    private func stopOutput() {
+        if let graph {
+            AUGraphStop(graph)
+            AUGraphUninitialize(graph)
+            DisposeAUGraph(graph)
+        }
+        graph = nil
+        outputUnit = nil
+    }
+
+    private func check(_ result: OSStatus, _ operation: String) throws {
+        guard result == noErr else { throw BridgeError(status: 503, message: "Could not \(operation): \(result)") }
+    }
+
+    private func set<T>(_ unit: AudioUnit, _ property: AudioUnitPropertyID, _ scope: AudioUnitScope,
+                        _ element: AudioUnitElement, _ value: inout T, _ operation: String = "configure virtual audio output") throws {
+        let result = withUnsafeBytes(of: &value) {
+            AudioUnitSetProperty(unit, property, scope, element, $0.baseAddress!, UInt32($0.count))
+        }
+        try check(result, operation)
     }
 
     deinit { stop() }

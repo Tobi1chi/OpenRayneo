@@ -61,15 +61,19 @@ Without a suitable identity, the script falls back to ad-hoc signing and prints 
 | 文字显示 | Send complete captions or a prompt title/body |
 | 通知 | Send a notification title and body |
 | 提词器 | Send a script, pause, resume, or end playback |
-| 语音与录音 | Start local ASR, optionally save audio, or record only; show/play the resulting WAV |
+| 语音与录音 | Start local ASR or WAV recording; manually start/stop finite LifeLog collection, inspect channel counts, and optionally save/play its mono WAV |
 
 The navigation renderer uses `final: true`. First-row alignment is automatic: the first navigation frame in a newly opened display session has no prefix; after a successful send, subsequent updates add one `U+3000` before the entire frame. The wearer reported that first display and later refreshes need different alignment. **重新打开显示**, ending or switching the display session, and starting a new connection worker reset this behavior. A failed first send does not advance to the update rule. The manual alignment toggle has been replaced by an explanation of this automatic behavior. The preview shows the logical 20×5 grid, not the compensating prefix. Navigation values are manually entered examples; no GPS or route provider is connected. If the wearer exits the page on the glasses, use **重新打开显示** to start a fresh session.
+
+The sidebar **进入麦克风模式** / **重新进入麦克风模式** allows retrying entry without reconnecting or re-pairing. It starts a fresh prompt session and restores the last prompt body sent from this window. **设备与 API → 恢复音频输出** retries only the audio outputs and decoder, preserving the current prompt SID. Changing macOS input/output devices or temporarily losing audio no longer causes the app to exit the microphone page. Explicit stop and the selected automatic-stop duration still end it.
 
 Switching display features stops the previous app-tracked session first. **结束当前功能** exits the tracked session. If you manually exit on the glasses, **重新打开显示** explicitly restarts the caption/prompt page because the current protocol does not reliably synchronize that manual exit back to the client. Successful sends indicate transmission; confirm visible rendering on the glasses.
 
 Real-time prompts activate glasses audio uplink. The prompt text panel forwards both channels through the installed driver by default, without saving or recognizing audio. If the driver is missing, the GUI uses a text-only prompt and displays installation guidance; reopen the prompt after installation. ASR/recording starts only through the audio controls; the existing [Opus and local speech requirements](asr.md) still apply. Finalized recordings can be revealed in Finder or opened in the default audio player.
 
-Weather, todos, and LifeLog diagnostics remain available through the HTTP API; they are not included in this first desktop panel. Avoid concurrent external display/audio control while using the GUI: its selected session reflects actions taken in this window.
+The audio page also offers manual LifeLog collection and optional mono WAV playback; it remains experimental and is not the default dual-microphone source.
+
+Weather and todos remain available through the HTTP API; they are not included in this first desktop panel. Avoid concurrent external display/audio control while using the GUI: its selected session reflects actions taken in this window.
 
 ## Service ownership and command-line use
 

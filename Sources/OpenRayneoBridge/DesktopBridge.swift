@@ -13,7 +13,7 @@ struct PairedGlasses: Identifiable, Sendable {
 }
 
 enum DesktopSession: String {
-    case navigation, video, captions, prompts, teleprompter, asr, recording
+    case navigation, video, captions, prompts, teleprompter, asr, recording, lifeLog
     var isAudio: Bool { self == .asr || self == .recording || self == .prompts }
     var stopPath: String {
         switch self {
@@ -21,6 +21,7 @@ enum DesktopSession: String {
         case .prompts: return "/v1/prompts/stop"
         case .teleprompter: return "/v1/teleprompter/stop"
         case .asr, .recording: return "/v1/asr/stop"
+        case .lifeLog: return "/v1/lifelog/stop"
         }
     }
     var title: String {
@@ -32,6 +33,7 @@ enum DesktopSession: String {
         case .teleprompter: return "提词器"
         case .asr: return "语音识别"
         case .recording: return "录音"
+        case .lifeLog: return "全天智记实验"
         }
     }
 }
@@ -62,9 +64,14 @@ final class DesktopBridge: ObservableObject {
     }
     @Published private(set) var transcript = ""
     @Published private(set) var audioSeconds = 0.0
+    @Published private(set) var lifeLogSeconds = 0.0
+    @Published private(set) var lifeLogChannels = "尚未收到音频"
+    @Published private(set) var lifeLogDecodeErrors = 0
     @Published private(set) var virtualAudioDevices: [VirtualAudioDevice] = []
     @Published private(set) var virtualMicrophoneName: String?
     @Published private(set) var microphoneForwarding = false
+    @Published private(set) var microphoneRecovering = false
+    @Published private(set) var microphoneAudioState = "stopped"
     @Published var microphoneDuration = 3_600
     var builtInMicrophonesReady: Bool {
         VirtualMicrophone.builtInDeviceUIDs.allSatisfy { uid in virtualAudioDevices.contains { $0.id == uid } }
@@ -89,6 +96,7 @@ final class DesktopBridge: ObservableObject {
 
     private var service: Process?
     private var navigationFrameSent = false
+    private var lastPromptContent: [String: Any]?
     private var videoImport: Task<Void, Never>?
     private var videoPlayback: Task<Void, Never>?
     private let pairing = BluetoothPairing()
@@ -303,6 +311,7 @@ final class DesktopBridge: ObservableObject {
             var body: [String: Any] = ["text": text, "final": true]
             if prompt { body["translation"] = translation }
             _ = try await self.request(prompt ? "/v1/prompts/text" : "/v1/captions/text", body: body)
+            if prompt { self.lastPromptContent = body }
             self.notice = "文字已发送。"
         }
     }
@@ -348,6 +357,71 @@ final class DesktopBridge: ObservableObject {
             self.activeSession = recognize ? .asr : .recording
             self.updateAudio(result)
             self.notice = recognize ? "正在使用眼镜麦克风识别语音。" : "正在录制眼镜双声道音频。"
+        }
+    }
+
+    func startLifeLog(duration: Int, record: Bool) {
+        perform("正在开启全天智记实验…") {
+            try await self.ensureConnected()
+            try await self.stopCurrent()
+            let result = try await self.request("/v1/lifelog/observe", body: ["duration": duration, "inspect_audio": true, "record": record])
+            self.activeSession = .lifeLog
+            self.updateLifeLog(result)
+            do {
+                let reply = try await self.request("/v1/lifelog/switch", body: ["enabled": true])
+                guard reply["acknowledged"] as? Bool == true else {
+                    throw DesktopError(message: "未收到全天智记开关应答。")
+                }
+            } catch {
+                try? await self.stopCurrent()
+                throw error
+            }
+            self.notice = "全天智记观察已开始，可以自然说话或点击“触发一轮音频”。"
+        }
+    }
+
+    func triggerLifeLogAudio() {
+        perform("正在请求一轮全天智记音频…") {
+            let result = try await self.request("/v1/lifelog/record", body: [:])
+            self.updateLifeLog(result)
+            self.notice = "已请求一轮全天智记音频。"
+        }
+    }
+
+    private func updateLifeLog(_ data: [String: Any]) {
+        let inspection = data["audioInspection"] as? [String: Any] ?? [:]
+        lifeLogSeconds = inspection["decodedSeconds"] as? Double ?? 0
+        lifeLogDecodeErrors = inspection["decodeErrors"] as? Int ?? 0
+        let recording = inspection["recording"] as? [String: Any]
+        recordingPath = recording?["path"] as? String
+        recordingFinalized = recording?["finalized"] as? Bool == true
+        if let error = inspection["recordingError"] as? String { errorMessage = error }
+        let channels = inspection["encodedChannelCounts"] as? [String: Int] ?? [:]
+        lifeLogChannels = channels.isEmpty ? "尚未收到音频" : channels.keys.sorted().map {
+            "\($0) 声道：\(channels[$0]!) 帧"
+        }.joined(separator: "；")
+        if let error = data["error"] as? String { errorMessage = error }
+    }
+
+    func enterMicrophoneMode() {
+        perform("正在进入麦克风模式…") {
+            self.refreshVirtualAudioDevices()
+            guard self.builtInMicrophonesReady else {
+                throw DesktopError(message: "请先在“设备与 API”安装内置驱动并刷新设备，再进入麦克风模式。")
+            }
+            try await self.prepareDisplay(.prompts, reopen: true)
+            if let content = self.lastPromptContent {
+                _ = try await self.request("/v1/prompts/text", body: content)
+            }
+            self.notice = "已进入麦克风模式；声音设备切换期间会保留眼镜页面。"
+        }
+    }
+
+    func recoverMicrophoneOutput() {
+        perform("正在恢复音频输出…") {
+            let result = try await self.request("/v1/virtual-mic/recover", body: [:])
+            self.updateAudio(result)
+            self.notice = "已重新检查两路音频输出，眼镜页面保持开启。"
         }
     }
 
@@ -549,7 +623,8 @@ final class DesktopBridge: ObservableObject {
         await cancelVideoPlayback()
         guard let current = activeSession else { return }
         let result = try await request(current.stopPath, body: [:])
-        if current.isAudio { updateAudio(result) }
+        if current == .lifeLog { updateLifeLog(result) }
+        else if current.isAudio { updateAudio(result) }
         activeSession = nil
     }
 
@@ -657,6 +732,15 @@ final class DesktopBridge: ObservableObject {
                     phase = connected ? "已连接" : ble["bluetoothState"] as? Int == 0 ? "等待系统蓝牙就绪" : names[rawPhase] ?? "连接阶段：\(rawPhase)"
                     if let bytes = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]) { diagnostics = String(decoding: bytes, as: UTF8.self) }
                 } else if !Task.isCancelled { connected = false; apiVerifiedAt = nil; phase = "后台服务暂时无响应" }
+                if activeSession == .lifeLog,
+                   let state = try? await request("/v1/lifelog", method: "GET", timeout: 2) {
+                    guard !Task.isCancelled else { return }
+                    updateLifeLog(state)
+                    if state["observing"] as? Bool == false {
+                        activeSession = nil
+                        notice = "全天智记观察已结束。"
+                    }
+                }
                 if activeSession == .asr || activeSession == .recording || (activeSession == .prompts && microphoneForwarding),
                    let audio = try? await request("/v1/asr", method: "GET", timeout: 2) {
                     guard !Task.isCancelled else { return }
@@ -675,7 +759,9 @@ final class DesktopBridge: ObservableObject {
         transcript = data["transcript"] as? String ?? ""
         audioSeconds = data["decodedSeconds"] as? Double ?? 0
         let microphones = data["virtualMicrophones"] as? [[String: Any]] ?? []
+        microphoneAudioState = data["audioState"] as? String ?? "stopped"
         microphoneForwarding = data["running"] as? Bool == true && data["engine"] as? String == "virtual-microphone"
+        microphoneRecovering = microphoneForwarding && microphones.contains { $0["recovering"] as? Bool == true }
         virtualMicrophoneName = microphones.compactMap { $0["deviceName"] as? String }.joined(separator: "、")
         if let recording = data["recording"] as? [String: Any] {
             recordingPath = recording["path"] as? String
@@ -706,7 +792,10 @@ final class DesktopBridge: ObservableObject {
         monitor = nil
         if let child = service, child.isRunning {
             if let current = activeSession {
-                if let result = try? await request(current.stopPath, body: [:], timeout: 5), current.isAudio { updateAudio(result) }
+                if let result = try? await request(current.stopPath, body: [:], timeout: 5) {
+                    if current == .lifeLog { updateLifeLog(result) }
+                    else if current.isAudio { updateAudio(result) }
+                }
             }
             // Also catches a start request completed by the server after client cancellation.
             if let result = try? await request("/v1/asr/stop", body: [:], timeout: 3) { updateAudio(result) }

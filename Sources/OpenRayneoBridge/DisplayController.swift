@@ -16,6 +16,7 @@ final class DisplayController {
     private var lifeLogTaskID: String?
     private var lifeLogEnabledByProbe = false
     private var lifeLogProbeError: String?
+    private var lifeLogAudioProbe: LifeLogAudioProbe?
 
     var isSpeechReserved: Bool {
         lock.lock()
@@ -73,7 +74,11 @@ final class DisplayController {
                 let duration = body["duration"] as? Int ?? 300
                 guard (10...600).contains(duration) else { throw BridgeError(status: 400, message: "duration must be 10 to 600 seconds") }
                 try transport.ensureConnected()
+                let record = body["record"] as? Bool ?? false
+                let probe = body["inspect_audio"] as? Bool == true || record ? try LifeLogAudioProbe(record: record) : nil
                 let id = UUID().uuidString
+                lifeLogAudioProbe = probe
+                transport.setLifeLogAudioHandler { [weak probe] message in probe?.consume(message) }
                 lifeLogObservationID = id
                 lifeLogProbeError = nil
                 transport.observeLifeLog { [weak self] message in
@@ -296,6 +301,7 @@ final class DisplayController {
         result["taskID"] = lifeLogTaskID as Any? ?? NSNull()
         result["enabledByProbe"] = lifeLogEnabledByProbe
         result["error"] = lifeLogProbeError as Any? ?? NSNull()
+        result["audioInspection"] = lifeLogAudioProbe?.status as Any? ?? NSNull()
         return result
     }
 
@@ -317,6 +323,9 @@ final class DisplayController {
     private func stopLifeLogProbe() {
         lifeLogObservationID = nil
         transport.observeLifeLog(nil)
+        transport.setLifeLogAudioHandler(nil)
+        do { try lifeLogAudioProbe?.finish() }
+        catch { lifeLogProbeError = (error as? BridgeError)?.message ?? error.localizedDescription }
         if lifeLogTaskID != nil {
             do { try send(0x0d, type: 166, body: ["rc": 1]); lifeLogTaskID = nil }
             catch { lifeLogProbeError = "Could not send the LifeLog exit command" }

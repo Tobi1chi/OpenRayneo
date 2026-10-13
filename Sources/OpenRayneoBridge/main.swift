@@ -691,10 +691,17 @@ final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate {
     private var recentDisplayMessages: [[String: Any]] = []
     private var droppedDisplayAudioPackets = 0
     private var audioHandler: ((RemoteMessage) -> Void)?
+    private var lifeLogAudioHandler: ((RemoteMessage) -> Void)?
     private var lifeLogWakeHandler: ((RemoteMessage) -> Void)?
     private var lifeLogEvents: [[String: Any]] = []
     private var lifeLogAudioCounts: [String: Int] = [:]
     private var lifeLogLastAudioMetadata: [String: Any] = [:]
+
+    func setLifeLogAudioHandler(_ handler: ((RemoteMessage) -> Void)?) {
+        receiveCondition.lock()
+        defer { receiveCondition.unlock() }
+        lifeLogAudioHandler = handler
+    }
 
     func observeLifeLog(_ wake: ((RemoteMessage) -> Void)?) {
         receiveCondition.lock()
@@ -900,7 +907,8 @@ final class RFCOMMTransport: NSObject, IOBluetoothRFCOMMChannelDelegate {
                                 }
                             }
                         }
-                        // The wake experiment counts audio; it does not retain packet payloads.
+                        if type == 163 { lifeLogAudioHandler?(message) }
+                        // Diagnostic observers may inspect PCM; packet payloads are not retained.
                         continue
                     }
                     lifeLogEvents.append(["type": type, "receivedAt": message.receivedAt.timeIntervalSince1970,
