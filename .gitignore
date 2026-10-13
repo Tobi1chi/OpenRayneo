@@ -4,6 +4,12 @@
 *.app/
 DerivedData/
 
+# Android builds and machine-specific SDK paths
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+
 # Local configuration and credentials
 .env
 .env.*
