@@ -27,6 +27,7 @@ swift build --package-path "$workspace_dir" --configuration release
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Contents/Frameworks"
 cp "$workspace_dir/.build/release/openrayneo-bridge" "$app_dir/Contents/MacOS/openrayneo-bridge"
 cp "$workspace_dir/Info.plist" "$app_dir/Contents/Info.plist"
+cp "$workspace_dir/assets/icons/OpenRayneo.icns" "$app_dir/Contents/Resources/OpenRayneo.icns"
 OPENRAYNEO_SIGNING_IDENTITY="$signing_identity" sh "$workspace_dir/scripts/build-audio-driver.sh"
 OPENRAYNEO_DRIVER_PACKAGE="$app_dir/Contents/Resources/OpenRayneoAudio.pkg" sh "$workspace_dir/scripts/package-audio-driver.sh"
 

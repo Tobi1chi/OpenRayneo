@@ -4,6 +4,12 @@ The current downloadable version is **v0.2.0**, an experimental prerelease for A
 
 ## Build a ZIP
 
+Source packaging is now **0.2.1** and includes the selected transparent glasses
+icon in `assets/icons/OpenRayneo.icns`. This does not change the existing v0.2.0
+GitHub download until a new release is published. Both platforms derive their
+icons from `assets/icons/openrayneo.png`; regenerate exports on macOS with
+`sh scripts/build-icons.sh`.
+
 From a macOS source checkout with Xcode Command Line Tools and `libopus` installed on the build machine (`brew install opus`):
 
 ```sh

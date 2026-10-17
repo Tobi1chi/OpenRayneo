@@ -1,5 +1,6 @@
 <resources>
     <color name="brand_pine">#256B52</color>
+    <color name="launcher_background">#171717</color>
     <style name="Theme.OpenRayneo" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>

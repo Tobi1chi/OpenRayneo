@@ -1,4 +1,5 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#00000000" android:strokeColor="#D5ECDD" android:strokeWidth="3" android:strokeLineJoin="round" android:strokeLineCap="round"
-        android:pathData="M24,48 L19,35 M84,48 L89,35 M27,45 L43,45 Q47,45 47,50 L47,61 Q47,66 42,66 L29,66 Q24,66 24,61 L24,50 Q24,45 27,45 M65,45 L81,45 Q84,45 84,50 L84,61 Q84,66 79,66 L66,66 Q61,66 61,61 L61,50 Q61,45 65,45 M47,51 Q54,44 61,51" />
-</vector>
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep the shared mark inside the adaptive icon's safe area. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_glasses_mark"
+    android:inset="18%" />
