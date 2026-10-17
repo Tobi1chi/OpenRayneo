@@ -119,10 +119,12 @@ internal object GlassesCoordinator {
                         }
                         PageSignal.LayoutPending -> state = state.copy(session = session.copy(phase = PagePhase.LAYOUT))
                         PageSignal.Settling -> state = state.copy(session = session.copy(phase = PagePhase.SETTLING))
-                        is PageSignal.Written -> if (signal.content == session.content) {
-                            state = state.copy(session = session.copy(phase = PagePhase.READY))
+                        is PageSignal.Written -> {
+                            val latest = signal.content == session.content
+                            state = state.copy(session = session.copy(writtenContent = signal.content,
+                                phase = if (latest) PagePhase.READY else session.phase))
                             val answer = state.intent as? DisplayIntent.Answer
-                            if (answer?.returnTo == ReturnTarget.NAVIGATION && state.navigation.enabled && state.restoreRevision != state.revision) {
+                            if (latest && answer?.returnTo == ReturnTarget.NAVIGATION && state.navigation.enabled && state.restoreRevision != state.revision) {
                                 cancelRestore()
                                 state = state.copy(restoreRevision = state.revision)
                                 effects += GlassesEffect.ScheduleRestore(session.id, state.revision, answer.ref)

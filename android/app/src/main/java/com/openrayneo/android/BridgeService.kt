@@ -30,10 +30,12 @@ internal class BridgeService : Service() {
     val busy get() = state.link.phase in setOf(LinkPhase.SCANNING, LinkPhase.CONNECTING, LinkPhase.RETRY_WAIT, LinkPhase.CLOSING)
     val displayStatus get() = state.displayDescription
     val audioStatus get() = state.audio.detail
+    val audioLevels get() = audio.state
     private val events = ArrayDeque<GlassesEvent>()
     private var dispatching = false
     private var destroyed = false
     private var initialized = false
+    private var foreground = false
     private var stopAfterDisconnect = false
     private var restoreTask: Runnable? = null
     private var closeTask: Runnable? = null
@@ -41,7 +43,20 @@ internal class BridgeService : Service() {
     private var nextAnswer = 0L
     private val pendingAnswers = mutableMapOf<AnswerSource, AnswerPermit>()
     private var notificationText = ""
-    private val navigationObserver: () -> Unit = { dispatch(GlassesEvent.NavigationChanged(navigationSnapshot())) }
+    private var notificationReadStatus = ""
+    private val navigationObserver: () -> Unit = {
+        if (notificationReadStatus != navigation.listenerState.detail) {
+            notificationReadStatus = navigation.listenerState.detail
+            onLog(notificationReadStatus)
+        }
+        dispatch(GlassesEvent.NavigationChanged(navigationSnapshot()))
+    }
+    private val notificationRefresh = object : Runnable {
+        override fun run() {
+            if (navigation.enabled) NavigationNotifications.refresh(this@BridgeService)
+            main.postDelayed(this, 30_000)
+        }
+    }
     private val audioRefresh = object : Runnable {
         override fun run() {
             audioOwner?.let { dispatch(GlassesEvent.AudioChanged(it, audio.state.coordinatorState())) }
@@ -69,7 +84,8 @@ internal class BridgeService : Service() {
             NotificationChannel("bridge", "眼镜连接与导航", NotificationManager.IMPORTANCE_LOW))
         initialized = true
         dispatch(GlassesEvent.NavigationChanged(navigationSnapshot()))
-        startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        NavigationNotifications.refresh(this)
+        main.postDelayed(notificationRefresh, 30_000)
         main.postDelayed(audioRefresh, 1_000)
     }
     override fun onBind(intent: Intent): IBinder = binder
@@ -79,7 +95,10 @@ internal class BridgeService : Service() {
             dispatch(GlassesEvent.StopNavigation)
             stopAfterDisconnect = true
             disconnect()
-        } else startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        } else {
+            startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            foreground = true
+        }
         return START_NOT_STICKY
     }
 
@@ -114,6 +133,7 @@ internal class BridgeService : Service() {
         updateNotification(); notifyUI()
         if (stopAfterDisconnect && state.link.phase == LinkPhase.DISCONNECTED && !state.disconnecting) {
             stopAfterDisconnect = false
+            foreground = false
             stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
         }
     }
@@ -263,7 +283,7 @@ internal class BridgeService : Service() {
             .addAction(Notification.Action.Builder(null, "停止服务", stop).build()).build()
     }
     private fun updateNotification() {
-        if (!initialized || stopAfterDisconnect) return
+        if (!initialized || !foreground || stopAfterDisconnect) return
         val text = summary()
         if (text != notificationText) { notificationText = text; getSystemService(NotificationManager::class.java).notify(1, notification()) }
     }

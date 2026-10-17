@@ -18,7 +18,10 @@ internal data class LinkState(val phase: LinkPhase = LinkPhase.DISCONNECTED, val
 internal enum class PageMode { NAVIGATION, PROMPT }
 internal enum class PagePhase { STARTING, LAYOUT, SETTLING, READY, CLOSING }
 internal data class PageContent(val key: String, val text: String, val answer: String? = null)
-internal data class PageSession(val id: Long, val mode: PageMode, val phase: PagePhase, val content: PageContent)
+internal data class PageSession(
+    val id: Long, val mode: PageMode, val phase: PagePhase, val content: PageContent,
+    val writtenContent: PageContent? = null,
+)
 internal data class NavigationState(val enabled: Boolean = false, val key: String? = null, val frame: String? = null)
 internal enum class AudioPhase { STOPPED, WAITING_PACKET, WAITING_PCM, RECEIVING, STALLED, FAILED }
 internal data class AudioState(val phase: AudioPhase = AudioPhase.STOPPED, val detail: String = "眼镜收音已停止")
@@ -50,6 +53,7 @@ internal data class GlassesState(
         session.phase == PagePhase.STARTING -> "等待眼镜确认启动"
         session.phase == PagePhase.LAYOUT -> "正在确认导航布局"
         session.phase == PagePhase.SETTLING -> "页面已确认，正在发送内容"
+        session.writtenContent != session.content -> "正在更新眼镜内容"
         session.mode == PageMode.NAVIGATION -> "导航会话已就绪"
         intent is DisplayIntent.Answer -> "回答会话已就绪"
         else -> "实时提示会话已就绪"

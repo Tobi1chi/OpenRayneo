@@ -1,0 +1,11 @@
+<resources>
+    <color name="brand_pine">#256B52</color>
+    <style name="Theme.OpenRayneo" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowSplashScreenBackground">#F6F7F2</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:colorAccent">#256B52</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
