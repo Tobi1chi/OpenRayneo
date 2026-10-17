@@ -2,7 +2,7 @@
     <style name="Theme.OpenRayneo" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowSplashScreenBackground">#F8F7F5</item>
+        <item name="android:windowSplashScreenBackground">#171717</item>
         <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
         <item name="android:colorAccent">#A1D5B6</item>
         <item name="android:windowActionModeOverlay">true</item>

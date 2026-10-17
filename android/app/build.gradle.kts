@@ -13,8 +13,15 @@ android {
         applicationId = "com.openrayneo.android"
         minSdk = 33
         targetSdk = 36
-        versionCode = 17
-        versionName = "0.5.4-dev"
+        versionCode = 18
+        versionName = "0.1.0"
+    }
+    buildTypes {
+        getByName("release") {
+            // v0.1 retains the existing development certificate for in-place upgrades.
+            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

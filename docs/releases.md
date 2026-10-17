@@ -1,29 +1,84 @@
 # Release packaging
 
-The current downloadable version is **v0.2.0**, an experimental prerelease for Apple Silicon (arm64), requiring macOS 15+. The bundled Opus binary has a macOS 15.0 minimum; the app metadata reflects that requirement even though the Swift code and native driver target macOS 13. Live device testing used macOS 15.6.1. Intel hardware has not been validated and is not included in this release. The original **v0.1.0** prerelease remains available.
+**v0.1** is the first coordinated macOS and Android stable release, selected by
+the maintainer. Both apps report **0.1.0**. The existing `v0.1.0` and `v0.2.0`
+GitHub releases remain historical Mac prereleases; their tags are not moved.
+The new stable tag is exactly `v0.1`. Mac build number 4 and Android versionCode
+18 continue increasing despite restarting the public version sequence.
 
-## Build a ZIP
+Both platforms use the light OR monogram from `assets/icons/openrayneo.png`.
+Run `sh scripts/build-icons.sh` on macOS to regenerate ICNS and Android resources.
+The artwork stays transparent; Android supplies an independent dark adaptive
+background. The README preview is `docs/assets/openrayneo-logo.png`.
 
-Source packaging is now **0.2.1** and includes the selected transparent OR monogram
-icon in `assets/icons/OpenRayneo.icns`. This does not change the existing v0.2.0
-GitHub download until a new release is published. Both platforms derive their
-icons from `assets/icons/openrayneo.png`; regenerate exports on macOS with
-`sh scripts/build-icons.sh`.
+## macOS ZIP
 
-From a macOS source checkout with Xcode Command Line Tools and `libopus` installed on the build machine (`brew install opus`):
+Build on macOS with Xcode Command Line Tools and `libopus` (`brew install opus`):
 
 ```sh
 sh scripts/package-release.sh
 ```
 
-The script reads the version from `Info.plist`, builds the native architecture, creates a fresh staging bundle under `.build/distributions/<version>-<architecture>/`, validates its metadata and signature, and produces `OpenRayneo-<version>-macos-<architecture>.zip`. To repeat a build, move the previous output directory aside first. Update both `CFBundleShortVersionString` and `CFBundleVersion` for subsequent versions.
+The script reads `Info.plist`, builds the native architecture, creates a fresh
+bundle in `.build/distributions/<version>-<architecture>/`, validates metadata
+and signing, and produces `OpenRayneo-<version>-macos-<architecture>.zip`.
+Move a previous staging directory aside before rebuilding. Update both the
+public version and internal build number for subsequent releases.
 
-Release packaging deliberately uses **ad-hoc signing**. It does not embed a developer's personal signing certificate, does not modify the existing app in the repository root, and does not perform Apple notarization. Gatekeeper acceptance on a fresh downloaded copy has not been validated. Signing validation is not notarization and does not guarantee compatibility with other Macs. Replacing an ad-hoc build can prompt again for Bluetooth/Speech permissions.
+The distributed Apple Silicon build requires macOS 15+ because of its bundled
+Opus library, although the Swift code and driver target macOS 13. Testing used
+macOS 15.6.1. Intel is not validated or included. The app is **ad-hoc signed and
+not Apple-notarized**; first launch may require per-app approval. A signature
+check does not establish notarization or compatibility with other Macs.
 
-Current source packaging includes the app executable/metadata, signed Opus decoder and its license, and the bundled `OpenRayneoAudio.pkg` installer for both native microphones. It excludes local API tokens, pairing records, videos, recordings, APKs, captures, and development logs. No video or audio content is bundled. The decoder is bundled for runtime use. Users install the included audio driver once through macOS Installer with administrator authentication, and may need to restart for Core Audio to load it. The driver is built from this repository; no external loopback application is required. See [ASR](asr.md) and [recording](recording.md).
+The bundle contains its icon, executable, Opus decoder/license and
+`OpenRayneoAudio.pkg`. Installing the two-channel microphone driver requires
+administrator authentication and may require a restart. No API tokens, pairing
+records, videos, recordings or development logs are packaged. See [ASR](asr.md)
+and [recording](recording.md).
+
+## Android APK
+
+```sh
+./android/gradlew -p android :app:assembleRelease :app:lintRelease
+```
+
+The output is `android/app/build/outputs/apk/release/app-release.apk`; distribute
+it as `OpenRayneo-0.1.0-android.apk`. Android 13+ is required. The release build
+is **not debuggable**. By the maintainer's explicit choice, v0.1 uses the existing
+development certificate (`signingConfigs.debug`) so the installed development
+app can upgrade without uninstalling or losing its private configuration.
+This is a direct-distribution compatibility choice, not a dedicated production
+signing key or Play Store signing setup.
+
+Future updates must use the same certificate. Keep a secure backup of the
+original build machine's `~/.android/debug.keystore`; never commit or upload it.
+A clean build machine generates a different debug certificate and its APK will
+not update existing installations. Compare signing certificates before upload.
+A future change to an unrelated release key requires a separate migration plan.
+
+## v0.1 scope and evidence
+
+- macOS: direct Bluetooth connection, display controls, local API, audio/ASR,
+  native microphone driver and existing diagnostics.
+- Android: direct Bluetooth connection, Gaode notification navigation, mobile
+  model configuration, desktop Codex access, display coordinator, compact UI,
+  onboarding and notification-listener recovery.
+- Shared transparent light OR icon, included in both packages and both READMEs.
+- Xiaomi 13 verified navigation and 0.5.2 manual listener recovery; the newer
+  automatic timeout recovery still needs a matching real-device failure test.
+- Android glasses ASR remains paused. Long-running background, outdoor-route and
+  cross-network scenarios have not all been validated. Stable release status
+  does not expand the documented hardware or feature coverage.
 
 ## Publish
 
-Commit the intended source and documentation, push the branch and a version tag at that commit, then attach the ZIP to a GitHub Release for that tag. Use prerelease status while the documented hardware limitations remain. Release notes should state architecture, minimum/tested macOS, signing/notarization status, bundled audio components and installation requirements, and unresolved pairing/display behavior. Do not claim a universal macOS binary or device compatibility based solely on compilation.
+Commit and push the intended source, create the new `v0.1` tag at that commit,
+and upload the macOS ZIP and signed Android APK to a **non-prerelease** GitHub
+Release. Keep the older prerelease tags and downloads intact. Explicitly mark
+this release latest because its version restarts below historical previews.
 
-Before uploading, extract the ZIP into a separate local directory and check the executable architecture, bundle version, file inventory, dynamic library paths, and code signature. Keep temporary verification artifacts outside the repository's tracked files.
+Before upload, extract the ZIP and check the bundled icon, metadata, architecture,
+dynamic library paths and code signature. Check the APK's version, non-debuggable
+manifest, launcher resources and signature. Build artifacts and signing keys
+stay outside tracked source files.
