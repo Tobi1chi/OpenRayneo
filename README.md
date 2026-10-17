@@ -4,11 +4,11 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**OpenRayneo v0.1 — RayNeo iO companion apps for macOS and Android.**
+**OpenRayneo v1.0 — RayNeo iO companion apps for macOS and Android.**
 
 OpenRayneo connects directly to RayNeo iO glasses. The Mac app provides a desktop control panel and local HTTP API for text, notifications, audio and automation. The Android app follows Gaode navigation notifications and connects to a configurable mobile model or Codex running on a computer. Both are unofficial companion apps; no modified official app is required.
 
-Both apps reuse the glasses' existing page protocols. Android navigation uses a fixed text grid; arbitrary graphics and screen mirroring are outside the current scope. [Download v0.1](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v0.1) · [Android setup](android/README.md)
+Both apps reuse the glasses' existing page protocols. Android navigation uses a fixed text grid; arbitrary graphics and screen mirroring are outside the current scope. [Download v1.0](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.0) · [Android setup](android/README.md)
 
 ## ASCII-style character video
 
@@ -67,13 +67,13 @@ The Swift package uses Apple's system frameworks and has no external Swift packa
 
 Download the Apple Silicon (arm64) ZIP from [GitHub Releases](https://github.com/Tobi1chi/OpenRayneo/releases). Unzip it and move `OpenRayneoBridge.app` to Applications, then open its **Device & API** page. New devices can use **Add and Pair Glasses**; already paired devices can connect directly. The download does not require Xcode.
 
-The v0.1 Mac package requires macOS 15+ on Apple Silicon and bundles Opus and the two-channel microphone driver installer. It is ad-hoc signed and not Apple-notarized; first launch may require per-app approval in macOS settings. Device testing used macOS 15.6.1; no Intel binary is included. ASR needs Apple's local language assets and Speech Recognition permission. The ZIP contains no videos, recordings or credentials.
+The v1.0 Mac package requires macOS 15+ on Apple Silicon and bundles Opus and the two-channel microphone driver installer. It is ad-hoc signed and not Apple-notarized; first launch may require per-app approval in macOS settings. Device testing used macOS 15.6.1; no Intel binary is included. ASR needs Apple's local language assets and Speech Recognition permission. The ZIP contains no videos, recordings or credentials.
 
 ## Android download
 
-The [v0.1 release](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v0.1) also includes `OpenRayneo-0.1.0-android.apk` for Android 13+. It provides direct glasses connection, Gaode notification navigation, mobile-model configuration and desktop Codex access. Follow the first-run guide and grant nearby-device and notification-listener access when requested. See [Android setup](android/README.md).
+The [v1.0 release](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.0) also includes `OpenRayneo-1.0.0-android.apk` for Android 13+. It provides direct glasses connection, Gaode notification navigation, mobile-model configuration and desktop Codex access. Follow the first-run guide and grant nearby-device and notification-listener access when requested. See [Android setup](android/README.md).
 
-This is a non-debuggable release build using the existing development signing certificate, by maintainer choice, so existing development installations can upgrade in place. Its versionCode is 18 even though the public version numbering restarts at v0.1. Android glasses ASR remains paused; long-running background and cross-network use still need validation.
+This is a non-debuggable release build using the existing development signing certificate, by maintainer choice, so existing development installations can upgrade in place. Its versionCode is 19, supporting upgrades from v0.1 and earlier development builds. Android glasses ASR remains paused; long-running background and cross-network use still need validation.
 
 For source builds and headless use, follow the steps below. To create a release ZIP from source, see [release packaging](docs/releases.md).
 

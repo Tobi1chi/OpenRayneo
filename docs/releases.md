@@ -1,10 +1,10 @@
 # Release packaging
 
-**v0.1** is the first coordinated macOS and Android stable release, selected by
-the maintainer. Both apps report **0.1.0**. The existing `v0.1.0` and `v0.2.0`
-GitHub releases remain historical Mac prereleases; their tags are not moved.
-The new stable tag is exactly `v0.1`. Mac build number 4 and Android versionCode
-18 continue increasing despite restarting the public version sequence.
+**v1.0** is the current coordinated macOS and Android stable release. Both apps
+report **1.0.0**. It supersedes v0.1 with the same functionality and light OR
+branding. Mac build number 5 and Android versionCode 19 support upgrades.
+The v0.1 release and historical Mac prereleases `v0.1.0` / `v0.2.0` remain
+available under their original tags.
 
 Both platforms use the light OR monogram from `assets/icons/openrayneo.png`.
 Run `sh scripts/build-icons.sh` on macOS to regenerate ICNS and Android resources.
@@ -44,8 +44,8 @@ and [recording](recording.md).
 ```
 
 The output is `android/app/build/outputs/apk/release/app-release.apk`; distribute
-it as `OpenRayneo-0.1.0-android.apk`. Android 13+ is required. The release build
-is **not debuggable**. By the maintainer's explicit choice, v0.1 uses the existing
+it as `OpenRayneo-1.0.0-android.apk`. Android 13+ is required. The release build
+is **not debuggable**. By the maintainer's explicit choice, v1.0 uses the existing
 development certificate (`signingConfigs.debug`) so the installed development
 app can upgrade without uninstalling or losing its private configuration.
 This is a direct-distribution compatibility choice, not a dedicated production
@@ -57,7 +57,7 @@ A clean build machine generates a different debug certificate and its APK will
 not update existing installations. Compare signing certificates before upload.
 A future change to an unrelated release key requires a separate migration plan.
 
-## v0.1 scope and evidence
+## v1.0 scope and evidence
 
 - macOS: direct Bluetooth connection, display controls, local API, audio/ASR,
   native microphone driver and existing diagnostics.
@@ -73,10 +73,9 @@ A future change to an unrelated release key requires a separate migration plan.
 
 ## Publish
 
-Commit and push the intended source, create the new `v0.1` tag at that commit,
+Commit and push the intended source, create the new `v1.0` tag at that commit,
 and upload the macOS ZIP and signed Android APK to a **non-prerelease** GitHub
-Release. Keep the older prerelease tags and downloads intact. Explicitly mark
-this release latest because its version restarts below historical previews.
+Release. Keep older tags and downloads intact and mark v1.0 as latest.
 
 Before upload, extract the ZIP and check the bundled icon, metadata, architecture,
 dynamic library paths and code signature. Check the APK's version, non-debuggable

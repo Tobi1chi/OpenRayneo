@@ -2,9 +2,9 @@
 
 面向普通、无 Root 安卓手机，直接连接 RayNeo iO。需要 Android 13（API 33）或更高版本。0.1.3-dev 已在小米 13 完成首次完整蓝牙连接；0.2.0-dev 已验证手机与电脑 Codex 对话、SDK 导航显示。
 
-当前正式版 v0.1（应用版本 0.1.0） 按用户要求改为**高德 App 导航通知跟随**，已移除高德 SDK、Key 和定位权限。导航在高德 App 里启动，OpenRayneo 读取导航通知后将方向／距离／路名显示到眼镜。导航恢复 `0x13` 的 20×5 固定大箭头／距离／动作／8 格路名，先启动字幕音频会话，再配置布局；导航音频按 48 kHz 单声道 PCM 解码。问答仍使用 `0x17` 实时提示和双声道，切换模式会重建会话。手机显示音量，只在内存处理，不保存或上传，可在设备页暂停／恢复。字幕音频与固定网格并行仍待眼镜真机验收。
+当前正式版 v1.0（应用版本 1.0.0） 按用户要求改为**高德 App 导航通知跟随**，已移除高德 SDK、Key 和定位权限。导航在高德 App 里启动，OpenRayneo 读取导航通知后将方向／距离／路名显示到眼镜。导航恢复 `0x13` 的 20×5 固定大箭头／距离／动作／8 格路名，先启动字幕音频会话，再配置布局；导航音频按 48 kHz 单声道 PCM 解码。问答仍使用 `0x17` 实时提示和双声道，切换模式会重建会话。手机显示音量，只在内存处理，不保存或上传，可在设备页暂停／恢复。字幕音频与固定网格并行仍待眼镜真机验收。
 
-v0.1 与 macOS 共用亮色 OR 图标，透明柔白字母与绿色标记，自适应图标使用独立深灰底色及安全留白。图源与导出说明见 [共享图标](../assets/icons/README.md)。正式发布包由 `assembleRelease` 生成且不可调试；按维护者选择沿用此前开发证书，内部版本号递增至 18，支持覆盖安装保留配置。该签名策略适用于本次直接分发，不等于使用独立发行密钥。重建同签名包需要原构建机的开发 keystore，详见 [发布说明](../docs/releases.md)。
+v1.0 与 macOS 共用亮色 OR 图标，透明柔白字母与绿色标记，自适应图标使用独立深灰底色及安全留白。图源与导出说明见 [共享图标](../assets/icons/README.md)。正式发布包由 `assembleRelease` 生成且不可调试；按维护者选择沿用此前开发证书，内部版本号递增至 19，支持覆盖安装保留配置。该签名策略适用于本次直接分发，不等于使用独立发行密钥。重建同签名包需要原构建机的开发 keystore，详见 [发布说明](../docs/releases.md)。
 
 0.5.2-dev 补齐通知监听恢复：断开后有限重连，前台与导航跟随期间补读快照，手动恢复使用本应用解绑／重绑，不更改通知授权；已授权和监听已连接分别显示。
 
@@ -32,7 +32,7 @@ adb shell am start -n com.openrayneo.android/.MainActivity
 小米系统若返回 `INSTALL_FAILED_USER_RESTRICTED`，可改为手动安装：
 
 ```sh
-adb push app/build/outputs/apk/release/app-release.apk /sdcard/Download/OpenRayneo-0.1.0-android.apk
+adb push app/build/outputs/apk/release/app-release.apk /sdcard/Download/OpenRayneo-1.0.0-android.apk
 ```
 
 在手机文件管理器的“下载”目录打开 APK，根据系统提示完成安装。USB 调试授权与 APK 安装许可是不同的步骤。

@@ -4,11 +4,11 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**OpenRayneo 正式版 v0.1：雷鸟 RayNeo iO 的 macOS 与 Android 伴侣应用。**
+**OpenRayneo 正式版 v1.0：雷鸟 RayNeo iO 的 macOS 与 Android 伴侣应用。**
 
 OpenRayneo 直接连接 RayNeo iO 眼镜。Mac 版提供原生控制界面及本机 HTTP API，用于文字显示、通知、音频和自动化；Android 版跟随高德导航通知，并支持自行配置手机模型或连接电脑 Codex。两端均为非官方伴侣应用，无需修改官方 App。
 
-两端复用眼镜已有页面协议，Android 导航使用固定文字网格；目前不提供任意图形绘制或屏幕镜像。[下载 v0.1](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v0.1) · [Android 使用说明](android/README.md)
+两端复用眼镜已有页面协议，Android 导航使用固定文字网格；目前不提供任意图形绘制或屏幕镜像。[下载 v1.0](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.0) · [Android 使用说明](android/README.md)
 
 ## ASCII 风格字符视频
 
@@ -68,13 +68,13 @@ OpenRayneo 直接连接 RayNeo iO 眼镜。Mac 版提供原生控制界面及本
 
 从 [GitHub Releases](https://github.com/Tobi1chi/OpenRayneo/releases) 下载 Apple Silicon（arm64）ZIP，解压后把 `OpenRayneoBridge.app` 移到“应用程序”，打开 **设备与 API** 页面。新眼镜可选择 **添加并配对眼镜**；已配对设备直接连接。使用下载的软件包不需要 Xcode。
 
-v0.1 Mac 包要求 Apple Silicon 与 macOS 15+，内置 Opus 解码库和两路麦克风驱动安装包。采用 ad-hoc 签名，未经过 Apple 公证，首次启动可能需要在 macOS 设置中批准该应用。真机实测为 macOS 15.6.1，本次不提供 Intel 二进制。ASR 还需要 Apple 本地语言资源和语音识别权限。ZIP 不包含视频、录音或凭据。
+v1.0 Mac 包要求 Apple Silicon 与 macOS 15+，内置 Opus 解码库和两路麦克风驱动安装包。采用 ad-hoc 签名，未经过 Apple 公证，首次启动可能需要在 macOS 设置中批准该应用。真机实测为 macOS 15.6.1，本次不提供 Intel 二进制。ASR 还需要 Apple 本地语言资源和语音识别权限。ZIP 不包含视频、录音或凭据。
 
 ## 下载 Android 软件包
 
-[v0.1 发布页](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v0.1) 同时提供 `OpenRayneo-0.1.0-android.apk`，要求 Android 13+。支持眼镜直连、高德通知导航、自行配置手机模型和连接电脑 Codex。按首次引导操作，在使用时授予附近设备与通知使用权，详见 [Android 使用说明](android/README.md)。
+[v1.0 发布页](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.0) 同时提供 `OpenRayneo-1.0.0-android.apk`，要求 Android 13+。支持眼镜直连、高德通知导航、自行配置手机模型和连接电脑 Codex。按首次引导操作，在使用时授予附近设备与通知使用权，详见 [Android 使用说明](android/README.md)。
 
-本次使用不可调试的 release 构建，按维护者选择沿用开发签名，支持覆盖旧开发包保留配置。对外版本从正式版 v0.1 重新开始，内部 versionCode 递增至 18。Android 眼镜 ASR 仍暂停，长时间后台与跨网络使用仍待验证。
+本次使用不可调试的 release 构建，按维护者选择沿用开发签名，支持覆盖旧开发包保留配置。内部 versionCode 递增至 19，可从 v0.1 或此前开发包覆盖升级。Android 眼镜 ASR 仍暂停，长时间后台与跨网络使用仍待验证。
 
 源码构建与 headless 使用方式见下文。发布包的构建步骤见[发布打包说明](docs/releases.md)。
 
