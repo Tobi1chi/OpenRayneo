@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Keep the shared mark inside the adaptive icon's safe area. -->
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@drawable/ic_glasses_mark"
+    android:drawable="@drawable/ic_brand_mark"
     android:inset="18%" />

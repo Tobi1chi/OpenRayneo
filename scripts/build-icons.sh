@@ -13,5 +13,5 @@ for size in 16 32 128 256 512; do
     sips -z "$doubled" "$doubled" "$source" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$iconset" -o "$workspace_dir/assets/icons/OpenRayneo.icns"
-sips -z 432 432 "$source" --out "$workspace_dir/android/app/src/main/res/drawable-nodpi/ic_glasses_mark.png" >/dev/null
+sips -z 432 432 "$source" --out "$workspace_dir/android/app/src/main/res/drawable-nodpi/ic_brand_mark.png" >/dev/null
 printf '%s\n' 'Exported macOS ICNS and Android transparent foreground.'
