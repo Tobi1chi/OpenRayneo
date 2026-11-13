@@ -5,8 +5,8 @@
     <key>CFBundleName</key><string>OpenRayneo Audio</string>
     <key>CFBundleExecutable</key><string>OpenRayneoAudio</string>
     <key>CFBundlePackageType</key><string>BNDL</string>
-    <key>CFBundleShortVersionString</key><string>0.2.0</string>
-    <key>CFBundleVersion</key><string>2</string>
+    <key>CFBundleShortVersionString</key><string>0.3.0</string>
+    <key>CFBundleVersion</key><string>3</string>
     <key>CFPlugInDynamicRegistration</key><false/>
     <key>CFPlugInFactories</key><dict>
         <key>D507C0D9-918C-4C86-BC68-DF91C1F90D28</key><string>OpenRayneoAudioFactory</string>

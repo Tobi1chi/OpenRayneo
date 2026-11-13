@@ -6,6 +6,7 @@ workspace_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 driver_dir=${OPENRAYNEO_DRIVER_DIR:-"$workspace_dir/.build/audio-driver/OpenRayneoAudio.driver"}
 mkdir -p "$driver_dir/Contents/MacOS"
 xcrun clang -std=c11 -O2 -Wall -Wextra -Werror -Wno-unused-parameter \
+    -arch arm64 -arch x86_64 \
     -mmacosx-version-min=13.0 -bundle -fvisibility=hidden \
     -framework CoreFoundation -framework CoreAudio \
     "$workspace_dir/Drivers/OpenRayneoAudio/OpenRayneoAudio.c" \
