@@ -1,8 +1,19 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.isFile) file.inputStream().use(::load)
+}
+
+fun signingProperty(name: String): String? =
+    System.getenv(name)?.takeIf { it.isNotBlank() }
+        ?: localProperties.getProperty(name)?.takeIf { it.isNotBlank() }
 
 android {
     namespace = "com.openrayneo.android"
@@ -16,11 +27,46 @@ android {
         versionCode = 19
         versionName = "1.0.0"
     }
+
+    val keystoreFile = signingProperty("OPENRAYNEO_KEYSTORE_FILE")?.let(::file)?.takeIf { it.isFile }
+    val keystorePassword = signingProperty("OPENRAYNEO_KEYSTORE_PASSWORD")
+    val keyAliasValue = signingProperty("OPENRAYNEO_KEY_ALIAS")
+    val keyPasswordValue = signingProperty("OPENRAYNEO_KEY_PASSWORD")
+    val hasExternalSigning =
+        keystoreFile != null &&
+            keystorePassword != null &&
+            keyAliasValue != null &&
+            keyPasswordValue != null
+
+    signingConfigs {
+        if (hasExternalSigning) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = keystorePassword
+                keyAlias = keyAliasValue
+                keyPassword = keyPasswordValue
+            }
+        }
+    }
+
     buildTypes {
         getByName("release") {
-            // v1.0 retains the existing development certificate for in-place upgrades.
-            signingConfig = signingConfigs.getByName("debug")
+            // Retains the existing debug certificate for in-place upgrades unless external signing is configured.
+            signingConfig =
+                if (hasExternalSigning) signingConfigs.getByName("release")
+                else signingConfigs.getByName("debug")
             isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+    sourceSets {
+        getByName("test") {
+            resources.srcDir("../../Tests/Fixtures")
         }
     }
     compileOptions {
@@ -40,4 +86,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
