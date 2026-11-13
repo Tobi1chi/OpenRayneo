@@ -42,6 +42,14 @@ final class WAVRecording {
          "finalized": finalized]
     }
 
+    static func quantizeSample(_ rawSample: Float) -> Int16 {
+        guard rawSample.isFinite else { return 0 }
+        let scaled = (Double(rawSample) * 32768.0).rounded()
+        if scaled <= -32768.0 { return Int16.min }
+        if scaled >= 32767.0 { return Int16.max }
+        return Int16(scaled)
+    }
+
     func append(_ buffer: AVAudioPCMBuffer) throws {
         let frameCount = Int(buffer.frameLength)
         let byteCount = frameCount * channels * 2
@@ -55,7 +63,7 @@ final class WAVRecording {
         var pcm = Data(capacity: byteCount)
         for frame in 0..<frameCount {
             for channel in 0..<channels {
-                let sample = Int16(max(-32768, min(32767, Int((samples[channel][frame] * 32768).rounded()))))
+                let sample = Self.quantizeSample(samples[channel][frame])
                 pcm.appendLittleEndian(UInt16(bitPattern: sample))
             }
         }

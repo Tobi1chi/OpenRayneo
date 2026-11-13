@@ -297,30 +297,81 @@ internal object GaodeNotificationParser {
             "向右前方行驶" to "右前",
             "向左后方行驶" to "左后",
             "向右后方行驶" to "右后",
+            "进入左转专用道" to "靠左",
+            "进入左侧辅路" to "靠左",
+            "进入右侧辅路" to "靠右",
+            "走左侧辅路" to "靠左",
+            "走右侧辅路" to "靠右",
+            "左侧上匝道" to "靠左",
+            "右侧上匝道" to "靠右",
             "左前方转弯" to "左前",
             "右前方转弯" to "右前",
-            "向左转" to "左转",
-            "向右转" to "右转",
+            "沿主路行驶" to "直行",
             "向左前方" to "左前",
             "向右前方" to "右前",
+            "向左后方" to "左后",
+            "向右后方" to "右后",
+            "前方掉头" to "掉头",
+            "左转掉头" to "掉头",
+            "右转掉头" to "掉头",
+            "继续直行" to "直行",
+            "保持直行" to "直行",
+            "靠左行驶" to "靠左",
+            "靠右行驶" to "靠右",
+            "驶入匝道" to "靠右",
+            "进入辅路" to "靠右",
+            "到达目的地" to "到达",
+            "到达终点" to "到达",
+            "向左转" to "左转",
+            "向右转" to "右转",
+            "上匝道" to "靠右",
+            "走辅路" to "靠右",
             "直行" to "直行",
             "左转" to "左转",
             "右转" to "右转",
             "掉头" to "掉头",
+            "靠左" to "靠左",
+            "靠右" to "靠右",
         )
-    private val action = actions.keys.joinToString("|") { Regex.escape(it) }
+    private val action =
+        actions.keys.sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) }
     private const val number = "([0-9]+(?:\\.[0-9]+)?)\\s*(公里|千米|米|km|m)"
+    private const val roundabout =
+        "(?:(?:进入|驶入)?环岛(?:[，,\\s]*(?:从)?第\\s*[0-9一二三四五六七八九十]+\\s*个?出口(?:驶出)?)?|从?第\\s*[0-9一二三四五六七八九十]+\\s*个?出口驶出环岛)"
+
     // Observed real notification: android.text = "直行314米｜高德导航中".
-    private val actionFirst = Regex("^($action)\\s*$number(?:[｜|\\s]|$)", RegexOption.IGNORE_CASE)
-    private val distanceFirst =
+    private val roundaboutActionFirst =
+        Regex("^$roundabout\\s*$number(?:[，,。｜|\\s]|$)", RegexOption.IGNORE_CASE)
+    private val roundaboutDistanceFirst =
         Regex(
-            "^(?:前方\\s*)?$number\\s*(?:后|处)?\\s*($action)(?:[，,。｜|\\s]|进入|驶入|$)",
+            "^(?:前方\\s*)?$number\\s*(?:后|处)?[，,\\s]*$roundabout(?:[，,。｜|\\s]|进入|驶入|$)",
             RegexOption.IGNORE_CASE,
         )
+    private val roundaboutImmediate =
+        Regex(
+            "^(?:请\\s*)?(?:(?:进入|驶入)?环岛[，,\\s]*(?:从)?第\\s*[0-9一二三四五六七八九十]+\\s*个?出口(?:驶出)?|从?第\\s*[0-9一二三四五六七八九十]+\\s*个?出口驶出环岛)(?:[，,。｜|\\s]|$)",
+        )
+    private val actionFirst =
+        Regex("^($action)\\s*$number(?:[，,。｜|\\s]|$)", RegexOption.IGNORE_CASE)
+    private val distanceFirst =
+        Regex(
+            "^(?:前方\\s*)?$number\\s*(?:后|处)?[，,\\s]*($action)(?:[，,。｜|\\s]|进入|驶入|沿|$)",
+            RegexOption.IGNORE_CASE,
+        )
+    private val arrivalImmediate =
+        Regex("^(?:已|即将)?到达(?:目的地|终点)(?:附近)?(?:[，,。！!｜|\\s]|$)")
 
     fun parse(texts: List<String>): Instruction? {
         for (text in texts) {
             val normalized = text.trim()
+            val rbFirst = roundaboutActionFirst.find(normalized)
+            if (rbFirst != null)
+                return distanceInstruction("环岛", rbFirst.groupValues[1], rbFirst.groupValues[2])
+            val rbSecond = roundaboutDistanceFirst.find(normalized)
+            if (rbSecond != null)
+                return distanceInstruction("环岛", rbSecond.groupValues[1], rbSecond.groupValues[2])
+            if (roundaboutImmediate.containsMatchIn(normalized))
+                return Instruction("环岛", 0)
             val first = actionFirst.find(normalized)
             if (first != null)
                 return instruction(first.groupValues[1], first.groupValues[2], first.groupValues[3])
@@ -331,14 +382,21 @@ internal object GaodeNotificationParser {
                     second.groupValues[1],
                     second.groupValues[2],
                 )
+            if (arrivalImmediate.containsMatchIn(normalized))
+                return Instruction("到达", 0)
         }
         return null
     }
 
     private fun instruction(action: String, value: String, unit: String): Instruction? {
+        val direction = actions[action] ?: return null
+        return distanceInstruction(direction, value, unit)
+    }
+
+    private fun distanceInstruction(direction: String, value: String, unit: String): Instruction? {
         val distance = value.toDoubleOrNull() ?: return null
         val meters = distance * if (unit.lowercase() in setOf("公里", "千米", "km")) 1000 else 1
         if (!meters.isFinite() || meters !in 0.0..9999.0) return null
-        return Instruction(actions.getValue(action), meters.roundToInt())
+        return Instruction(direction, meters.roundToInt())
     }
 }

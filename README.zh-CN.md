@@ -256,7 +256,7 @@ curl -X POST http://127.0.0.1:8765/v1/captions/stop \
 
 ### 两路内置虚拟麦克风
 
-App 自带音频驱动安装包和 Opus 解码库。在 **设备与 API** 页面安装一次内置驱动（macOS 请求管理员授权），连接后默认同时转送到 **OpenRayneo Microphone Channel 1（自己的声音）** 和 **Channel 2（前方声音）**。Codex 选择 Channel 1，其他应用可以同时读取 Channel 2，无需 BlackHole 或 Background Music。安装后若未出现两个输入设备，请重启 Mac 并刷新设备。
+App 自带音频驱动安装包和 Opus 解码库。在 **设备与 API** 页面安装一次内置驱动（macOS 请求管理员授权，安装包会自动重载 `coreaudiod`），连接后默认同时转送到 **OpenRayneo Microphone Channel 1（自己的声音）** 和 **Channel 2（前方声音）**。Codex 选择 Channel 1，其他应用可以同时读取 Channel 2，无需 BlackHole 或 Background Music。安装后点击“刷新设备”即可识别；如仍未出现，可手动执行 `sudo killall coreaudiod` 或重启 Mac。
 
 转送不保存 WAV、不启动 ASR、不修改默认音频设备；它与 ASR/录音共享眼镜会话，并与实时提示的回答更新共用页面。桌面连接后默认开启两路，驱动安装与时长设置位于“设备与 API”，不再提供独立麦克风页面。设置、API 和当前验证范围见[内置虚拟麦克风说明](docs/virtual-microphone.md)。
 

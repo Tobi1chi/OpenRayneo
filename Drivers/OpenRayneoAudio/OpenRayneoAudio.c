@@ -10,49 +10,122 @@
 #include <stdint.h>
 #include <string.h>
 
-// Each device has one mono input and one mono loopback sink. No client HAL calls
-// or IPC are made inside the driver. The existing Bridge writes to the sinks.
-enum { kDevice1 = 2, kInput1 = 3, kOutput1 = 4,
-       kDevice2 = 5, kInput2 = 6, kOutput2 = 7,
-       kRingFrames = 65536, kClockPeriod = 16384, kLoopbackFrames = 1024 };
-static const double kRate = 48000.0;
+#include "OpenRayneoAudioRing.h"
+
+// Each logical microphone channel exposes one public input-only device for capture apps
+// and one hidden output-only sink device written exclusively by OpenRayneo Bridge.
+// Both share a phase-locked global frame clock and a single-word 64-bit atomic ring buffer.
+enum {
+    kInputDevice1 = 2,
+    kInputStream1 = 3,
+    kSinkDevice1  = 4,
+    kSinkStream1  = 5,
+    kInputDevice2 = 6,
+    kInputStream2 = 7,
+    kSinkDevice2  = 8,
+    kSinkStream2  = 9,
+    kDeviceCount  = 4,
+    kClockDomainID = 0x4F524E41 // 'ORNA'
+};
+
+static const double kRate = (double)kOpenRayneoSampleRate;
 
 typedef struct {
-    _Atomic uint32_t samples[kRingFrames];
-    _Atomic int64_t tags[kRingFrames];
-    _Atomic uint32_t runningClients;
-    _Atomic uint64_t anchor;
-    _Atomic uint64_t seed;
-} Channel;
+    _Atomic uint64_t slots[kOpenRayneoRingFrames];
+} ChannelRing;
 
-static Channel gChannels[2];
+typedef struct {
+    _Atomic uint32_t runningClients;
+    _Atomic uint64_t baseFrame;
+    _Atomic uint64_t seed;
+} DeviceClock;
+
+static ChannelRing gChannels[2];
+static DeviceClock gDevices[kDeviceCount];
 static pthread_mutex_t gStateLock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic uint32_t gReferences = 1;
 static AudioServerPlugInHostRef gHost;
-static double gTicksPerFrame;
+static OpenRayneoTimebase gTimebase;
+static uint64_t gEpochTicks;
 static AudioServerPlugInDriverInterface gInterface;
 static AudioServerPlugInDriverInterface *gInterfacePointer = &gInterface;
 static AudioServerPlugInDriverRef gDriver = &gInterfacePointer;
 
+static Boolean isInputDevice(AudioObjectID object) {
+    return object == kInputDevice1 || object == kInputDevice2;
+}
+static Boolean isSinkDevice(AudioObjectID object) {
+    return object == kSinkDevice1 || object == kSinkDevice2;
+}
+static Boolean isDevice(AudioObjectID object) {
+    return isInputDevice(object) || isSinkDevice(object);
+}
+static Boolean isInputStream(AudioObjectID object) {
+    return object == kInputStream1 || object == kInputStream2;
+}
+static Boolean isSinkStream(AudioObjectID object) {
+    return object == kSinkStream1 || object == kSinkStream2;
+}
+static Boolean isStream(AudioObjectID object) {
+    return isInputStream(object) || isSinkStream(object);
+}
 static int channelIndex(AudioObjectID object) {
-    if (object >= kDevice1 && object <= kOutput1) return 0;
-    if (object >= kDevice2 && object <= kOutput2) return 1;
+    if (object >= kInputDevice1 && object <= kSinkStream1) return 0;
+    if (object >= kInputDevice2 && object <= kSinkStream2) return 1;
     return -1;
 }
-static Boolean isDevice(AudioObjectID object) { return object == kDevice1 || object == kDevice2; }
-static Boolean isStream(AudioObjectID object) { return object == kInput1 || object == kOutput1 || object == kInput2 || object == kOutput2; }
-static Boolean isInput(AudioObjectID object) { return object == kInput1 || object == kInput2; }
-static AudioObjectID deviceID(int channel) { return channel == 0 ? kDevice1 : kDevice2; }
-static AudioClassID objectClass(AudioObjectID object) {
-    return object == kAudioObjectPlugInObject ? kAudioPlugInClassID : isDevice(object) ? kAudioDeviceClassID : kAudioStreamClassID;
+static int deviceSlotIndex(AudioObjectID device) {
+    switch (device) {
+        case kInputDevice1: return 0;
+        case kSinkDevice1:  return 1;
+        case kInputDevice2: return 2;
+        case kSinkDevice2:  return 3;
+        default:            return -1;
+    }
 }
-static CFStringRef deviceUID(int channel) {
-    return channel == 0 ? CFSTR("com.openrayneo.microphone.channel1") : CFSTR("com.openrayneo.microphone.channel2");
+static AudioObjectID streamForDevice(AudioObjectID device) {
+    switch (device) {
+        case kInputDevice1: return kInputStream1;
+        case kSinkDevice1:  return kSinkStream1;
+        case kInputDevice2: return kInputStream2;
+        case kSinkDevice2:  return kSinkStream2;
+        default:            return kAudioObjectUnknown;
+    }
+}
+static AudioObjectID ownerForStream(AudioObjectID stream) {
+    switch (stream) {
+        case kInputStream1: return kInputDevice1;
+        case kSinkStream1:  return kSinkDevice1;
+        case kInputStream2: return kInputDevice2;
+        case kSinkStream2:  return kSinkDevice2;
+        default:            return kAudioObjectUnknown;
+    }
+}
+static AudioClassID objectClass(AudioObjectID object) {
+    if (object == kAudioObjectPlugInObject) return kAudioPlugInClassID;
+    if (isDevice(object)) return kAudioDeviceClassID;
+    return kAudioStreamClassID;
+}
+static CFStringRef deviceUID(AudioObjectID device) {
+    switch (device) {
+        case kInputDevice1: return CFSTR("com.openrayneo.microphone.channel1");
+        case kSinkDevice1:  return CFSTR("com.openrayneo.microphone.sink1");
+        case kInputDevice2: return CFSTR("com.openrayneo.microphone.channel2");
+        case kSinkDevice2:  return CFSTR("com.openrayneo.microphone.sink2");
+        default:            return CFSTR("");
+    }
 }
 static CFStringRef objectName(AudioObjectID object) {
-    if (object == kAudioObjectPlugInObject) return CFSTR("OpenRayneo Audio");
-    if (isStream(object)) return isInput(object) ? CFSTR("Microphone") : CFSTR("Bridge audio sink");
-    return channelIndex(object) == 0 ? CFSTR("OpenRayneo Microphone Channel 1") : CFSTR("OpenRayneo Microphone Channel 2");
+    switch (object) {
+        case kAudioObjectPlugInObject: return CFSTR("OpenRayneo Audio");
+        case kInputDevice1:            return CFSTR("OpenRayneo Microphone Channel 1");
+        case kInputDevice2:            return CFSTR("OpenRayneo Microphone Channel 2");
+        case kSinkDevice1:             return CFSTR("OpenRayneo Audio Sink Channel 1");
+        case kSinkDevice2:             return CFSTR("OpenRayneo Audio Sink Channel 2");
+        case kInputStream1:
+        case kInputStream2:            return CFSTR("Microphone");
+        default:                       return CFSTR("Bridge audio sink");
+    }
 }
 static AudioStreamBasicDescription streamFormat(void) {
     return (AudioStreamBasicDescription) {
@@ -84,9 +157,19 @@ static OSStatus initialize(AudioServerPlugInDriverRef driver, AudioServerPlugInH
     gHost = host;
     mach_timebase_info_data_t timebase;
     mach_timebase_info(&timebase);
-    gTicksPerFrame = (1.0e9 * timebase.denom / timebase.numer) / kRate;
-    for (int channel = 0; channel < 2; channel++) {
-        for (int frame = 0; frame < kRingFrames; frame++) atomic_store(&gChannels[channel].tags[frame], INT64_MIN);
+    gTimebase = (OpenRayneoTimebase) {
+        .numer = timebase.numer ? timebase.numer : 1u,
+        .denom = timebase.denom ? timebase.denom : 1u,
+        .sampleRate = (uint32_t)kOpenRayneoSampleRate
+    };
+    gEpochTicks = mach_absolute_time();
+    for (int ch = 0; ch < 2; ch++) {
+        openRayneoRingClear(gChannels[ch].slots);
+    }
+    for (int i = 0; i < kDeviceCount; i++) {
+        atomic_store_explicit(&gDevices[i].runningClients, 0u, memory_order_relaxed);
+        atomic_store_explicit(&gDevices[i].baseFrame, 0ULL, memory_order_relaxed);
+        atomic_store_explicit(&gDevices[i].seed, 1ULL, memory_order_relaxed);
     }
     return noErr;
 }
@@ -108,7 +191,10 @@ static OSStatus configurationChange(AudioServerPlugInDriverRef driver, AudioObje
 
 static Boolean hasProperty(AudioServerPlugInDriverRef driver, AudioObjectID object, pid_t client,
                             const AudioObjectPropertyAddress *address) {
-    if (!address || object < 1 || object > kOutput2 || address->mElement != kAudioObjectPropertyElementMain) return false;
+    if (!address || object < kAudioObjectPlugInObject || object > kSinkStream2 ||
+        address->mElement != kAudioObjectPropertyElementMain) {
+        return false;
+    }
     switch (address->mSelector) {
         case kAudioObjectPropertyBaseClass:
         case kAudioObjectPropertyClass:
@@ -165,15 +251,21 @@ static Boolean hasProperty(AudioServerPlugInDriverRef driver, AudioObjectID obje
 
 static UInt32 objectList(AudioObjectID object, const AudioObjectPropertyAddress *address,
                           UInt32 qualifierSize, const void *qualifier, AudioObjectID *result) {
-    AudioObjectID candidates[2];
+    AudioObjectID candidates[kDeviceCount];
     UInt32 count = 0;
     if (object == kAudioObjectPlugInObject) {
-        candidates[count++] = kDevice1;
-        candidates[count++] = kDevice2;
-    } else if (isDevice(object)) {
-        int channel = channelIndex(object);
-        if (address->mScope != kAudioObjectPropertyScopeOutput) candidates[count++] = deviceID(channel) + 1;
-        if (address->mScope != kAudioObjectPropertyScopeInput) candidates[count++] = deviceID(channel) + 2;
+        candidates[count++] = kInputDevice1;
+        candidates[count++] = kSinkDevice1;
+        candidates[count++] = kInputDevice2;
+        candidates[count++] = kSinkDevice2;
+    } else if (isInputDevice(object)) {
+        if (address->mScope != kAudioObjectPropertyScopeOutput) {
+            candidates[count++] = streamForDevice(object);
+        }
+    } else if (isSinkDevice(object)) {
+        if (address->mScope != kAudioObjectPropertyScopeInput) {
+            candidates[count++] = streamForDevice(object);
+        }
     }
     UInt32 matched = 0;
     for (UInt32 i = 0; i < count; i++) {
@@ -181,10 +273,16 @@ static UInt32 objectList(AudioObjectID object, const AudioObjectPropertyAddress 
         if (qualifier && address->mSelector == kAudioObjectPropertyOwnedObjects) {
             const AudioClassID *classes = qualifier;
             for (UInt32 j = 0; j < qualifierSize / sizeof(AudioClassID); j++) {
-                if (classes[j] == kAudioObjectClassID || classes[j] == objectClass(candidates[i])) include = true;
+                if (classes[j] == kAudioObjectClassID || classes[j] == objectClass(candidates[i])) {
+                    include = true;
+                }
             }
-        } else include = true;
-        if (include) result[matched++] = candidates[i];
+        } else {
+            include = true;
+        }
+        if (include) {
+            result[matched++] = candidates[i];
+        }
     }
     return matched;
 }
@@ -203,11 +301,11 @@ static OSStatus propertySize(AudioServerPlugInDriverRef driver, AudioObjectID ob
         case kAudioObjectPropertyOwnedObjects:
         case kAudioPlugInPropertyDeviceList:
         case kAudioDevicePropertyStreams: {
-            AudioObjectID list[2];
+            AudioObjectID list[kDeviceCount];
             *size = objectList(object, address, qualifierSize, qualifier, list) * sizeof(AudioObjectID);
             break;
         }
-        case kAudioDevicePropertyRelatedDevices: *size = 2 * sizeof(AudioObjectID); break;
+        case kAudioDevicePropertyRelatedDevices: *size = sizeof(AudioObjectID); break;
         case kAudioObjectPropertyControlList:
         case kAudioObjectPropertyCustomPropertyInfoList:
         case kAudioPlugInPropertyBoxList:
@@ -231,44 +329,72 @@ static OSStatus getProperty(AudioServerPlugInDriverRef driver, AudioObjectID obj
     if (capacity < *size) return kAudioHardwareBadPropertySizeError;
     if (*size == 0) return noErr;
     if (!output) return kAudioHardwareIllegalOperationError;
-    int channel = channelIndex(object);
     UInt32 value = 0;
     CFStringRef string = NULL;
     switch (address->mSelector) {
         case kAudioObjectPropertyName: string = objectName(object); break;
         case kAudioObjectPropertyManufacturer: string = CFSTR("OpenRayneo"); break;
         case kAudioPlugInPropertyBundleID: string = CFSTR("com.openrayneo.audio.driver"); break;
-        case kAudioDevicePropertyDeviceUID: string = deviceUID(channel); break;
-        case kAudioDevicePropertyModelUID: string = CFSTR("com.openrayneo.microphone"); break;
+        case kAudioDevicePropertyDeviceUID: string = deviceUID(object); break;
+        case kAudioDevicePropertyModelUID:
+            string = isSinkDevice(object) ? CFSTR("com.openrayneo.microphone.sink") : CFSTR("com.openrayneo.microphone");
+            break;
         case kAudioObjectPropertyBaseClass: value = kAudioObjectClassID; break;
         case kAudioObjectPropertyClass: value = objectClass(object); break;
-        case kAudioObjectPropertyOwner: value = object == kAudioObjectPlugInObject ? kAudioObjectUnknown : isDevice(object) ? kAudioObjectPlugInObject : deviceID(channel); break;
+        case kAudioObjectPropertyOwner:
+            value = object == kAudioObjectPlugInObject
+                ? kAudioObjectUnknown
+                : (isDevice(object) ? kAudioObjectPlugInObject : ownerForStream(object));
+            break;
         case kAudioObjectPropertyOwnedObjects:
         case kAudioPlugInPropertyDeviceList:
-        case kAudioDevicePropertyStreams: objectList(object, address, qualifierSize, qualifier, output); return noErr;
-        case kAudioDevicePropertyRelatedDevices: {
-            AudioObjectID list[] = { kDevice1, kDevice2 };
-            memcpy(output, list, sizeof(list)); return noErr;
-        }
-        case kAudioPlugInPropertyTranslateUIDToDevice:
+        case kAudioDevicePropertyStreams:
+            objectList(object, address, qualifierSize, qualifier, output);
+            return noErr;
+        case kAudioDevicePropertyRelatedDevices:
+            *(AudioObjectID *)output = object;
+            return noErr;
+        case kAudioPlugInPropertyTranslateUIDToDevice: {
             if (qualifierSize != sizeof(CFStringRef) || !qualifier) return kAudioHardwareBadPropertySizeError;
-            for (int i = 0; i < 2; i++) if (CFEqual(*(CFStringRef const *)qualifier, deviceUID(i))) value = deviceID(i);
+            CFStringRef targetUID = *(CFStringRef const *)qualifier;
+            if (!targetUID) return kAudioHardwareIllegalOperationError;
+            const AudioObjectID devices[kDeviceCount] = { kInputDevice1, kSinkDevice1, kInputDevice2, kSinkDevice2 };
+            value = kAudioObjectUnknown;
+            for (int i = 0; i < kDeviceCount; i++) {
+                if (CFEqual(targetUID, deviceUID(devices[i]))) {
+                    value = devices[i];
+                    break;
+                }
+            }
             break;
+        }
         case kAudioDevicePropertyTransportType: value = kAudioDeviceTransportTypeVirtual; break;
-        case kAudioDevicePropertyClockDomain: value = 0; break;
+        case kAudioDevicePropertyClockDomain: value = kClockDomainID; break;
         case kAudioDevicePropertyDeviceIsAlive:
         case kAudioDevicePropertyClockIsStable:
         case kAudioStreamPropertyIsActive:
         case kAudioStreamPropertyStartingChannel: value = 1; break;
-        case kAudioDevicePropertyDeviceIsRunning: value = atomic_load(&gChannels[channel].runningClients) > 0; break;
-        case kAudioDevicePropertyDeviceCanBeDefaultDevice: value = address->mScope == kAudioObjectPropertyScopeInput; break;
+        case kAudioDevicePropertyDeviceIsRunning: {
+            int slot = deviceSlotIndex(object);
+            value = slot >= 0 && atomic_load_explicit(&gDevices[slot].runningClients, memory_order_acquire) > 0;
+            break;
+        }
+        case kAudioDevicePropertyDeviceCanBeDefaultDevice:
+            value = isInputDevice(object) && address->mScope == kAudioObjectPropertyScopeInput;
+            break;
         case kAudioDevicePropertyDeviceCanBeDefaultSystemDevice:
         case kAudioDevicePropertySafetyOffset:
-        case kAudioDevicePropertyIsHidden: value = 0; break;
-        case kAudioDevicePropertyLatency: value = isDevice(object) && address->mScope == kAudioObjectPropertyScopeInput ? kLoopbackFrames : 0; break;
-        case kAudioDevicePropertyZeroTimeStampPeriod: value = kClockPeriod; break;
-        case kAudioStreamPropertyDirection: value = isInput(object) ? 1 : 0; break;
-        case kAudioStreamPropertyTerminalType: value = isInput(object) ? kAudioStreamTerminalTypeMicrophone : kAudioStreamTerminalTypeLine; break;
+        case kAudioStreamPropertyLatency: value = 0; break;
+        case kAudioDevicePropertyIsHidden: value = isSinkDevice(object) ? 1 : 0; break;
+        case kAudioDevicePropertyLatency:
+            value = (isInputDevice(object) && address->mScope != kAudioObjectPropertyScopeOutput)
+                ? kOpenRayneoLoopbackFrames : 0;
+            break;
+        case kAudioDevicePropertyZeroTimeStampPeriod: value = kOpenRayneoClockPeriod; break;
+        case kAudioStreamPropertyDirection: value = isInputStream(object) ? 1 : 0; break;
+        case kAudioStreamPropertyTerminalType:
+            value = isInputStream(object) ? kAudioStreamTerminalTypeMicrophone : kAudioStreamTerminalTypeLine;
+            break;
         case kAudioDevicePropertyNominalSampleRate: *(Float64 *)output = kRate; return noErr;
         case kAudioDevicePropertyAvailableNominalSampleRates: *(AudioValueRange *)output = (AudioValueRange){ kRate, kRate }; return noErr;
         case kAudioStreamPropertyVirtualFormat:
@@ -313,44 +439,69 @@ static OSStatus setProperty(AudioServerPlugInDriverRef driver, AudioObjectID obj
 }
 
 static OSStatus startIO(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client) {
-    if (!isDevice(device)) return kAudioHardwareBadObjectError;
-    Channel *channel = &gChannels[channelIndex(device)];
+    int slot = deviceSlotIndex(device);
+    int ch = channelIndex(device);
+    if (slot < 0 || ch < 0) return kAudioHardwareBadObjectError;
+    DeviceClock *dev = &gDevices[slot];
     pthread_mutex_lock(&gStateLock);
-    if (atomic_load(&channel->runningClients) == 0) {
-        for (int frame = 0; frame < kRingFrames; frame++) atomic_store_explicit(&channel->tags[frame], INT64_MIN, memory_order_relaxed);
-        atomic_store(&channel->anchor, mach_absolute_time());
-        atomic_fetch_add(&channel->seed, 1);
+    if (atomic_load_explicit(&dev->runningClients, memory_order_relaxed) == 0) {
+        if (isSinkDevice(device)) {
+            openRayneoRingClear(gChannels[ch].slots);
+        }
+        uint64_t base = openRayneoAlignBaseFrame(gEpochTicks, mach_absolute_time(), gTimebase);
+        atomic_store_explicit(&dev->baseFrame, base, memory_order_relaxed);
+        atomic_fetch_add_explicit(&dev->seed, 1ULL, memory_order_release);
     }
-    atomic_fetch_add(&channel->runningClients, 1);
+    atomic_fetch_add_explicit(&dev->runningClients, 1u, memory_order_release);
     pthread_mutex_unlock(&gStateLock);
     return noErr;
 }
 static OSStatus stopIO(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client) {
-    if (!isDevice(device)) return kAudioHardwareBadObjectError;
-    Channel *channel = &gChannels[channelIndex(device)];
+    int slot = deviceSlotIndex(device);
+    int ch = channelIndex(device);
+    if (slot < 0 || ch < 0) return kAudioHardwareBadObjectError;
+    DeviceClock *dev = &gDevices[slot];
     pthread_mutex_lock(&gStateLock);
-    uint32_t clients = atomic_load(&channel->runningClients);
-    if (clients > 0) atomic_fetch_sub(&channel->runningClients, 1);
+    uint32_t clients = atomic_load_explicit(&dev->runningClients, memory_order_relaxed);
+    if (clients > 0) {
+        uint32_t remaining = clients - 1u;
+        atomic_store_explicit(&dev->runningClients, remaining, memory_order_release);
+        if (remaining == 0u && isSinkDevice(device)) {
+            openRayneoRingClear(gChannels[ch].slots);
+        }
+    }
     pthread_mutex_unlock(&gStateLock);
     return noErr;
 }
 static OSStatus zeroTimestamp(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client,
                                Float64 *sample, UInt64 *host, UInt64 *seed) {
-    if (!isDevice(device)) return kAudioHardwareBadObjectError;
-    Channel *channel = &gChannels[channelIndex(device)];
-    uint64_t anchor = atomic_load(&channel->anchor);
-    uint64_t now = mach_absolute_time();
-    double ticksPerPeriod = gTicksPerFrame * kClockPeriod;
-    uint64_t periods = now >= anchor ? (uint64_t)((now - anchor) / ticksPerPeriod) : 0;
-    *sample = (double)periods * kClockPeriod;
-    *host = anchor + (uint64_t)(periods * ticksPerPeriod);
-    *seed = atomic_load(&channel->seed);
+    int slot = deviceSlotIndex(device);
+    if (slot < 0) return kAudioHardwareBadObjectError;
+    if (!sample || !host || !seed) return kAudioHardwareIllegalOperationError;
+    DeviceClock *dev = &gDevices[slot];
+    uint64_t s1, s2, base;
+    do {
+        s1 = atomic_load_explicit(&dev->seed, memory_order_acquire);
+        base = atomic_load_explicit(&dev->baseFrame, memory_order_relaxed);
+        s2 = atomic_load_explicit(&dev->seed, memory_order_acquire);
+    } while (s1 != s2);
+    double sampleTime = 0.0;
+    uint64_t hostTicks = 0ULL;
+    openRayneoComputeZeroTimestamp(gEpochTicks, mach_absolute_time(), base, gTimebase, &sampleTime, &hostTicks);
+    *sample = sampleTime;
+    *host = hostTicks;
+    *seed = s2;
     return noErr;
 }
 static OSStatus willDoIO(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client,
                           UInt32 operation, Boolean *willDo, Boolean *inPlace) {
     if (!isDevice(device)) return kAudioHardwareBadObjectError;
-    *willDo = operation == kAudioServerPlugInIOOperationReadInput || operation == kAudioServerPlugInIOOperationWriteMix;
+    if (!willDo || !inPlace) return kAudioHardwareIllegalOperationError;
+    if (isInputDevice(device)) {
+        *willDo = operation == kAudioServerPlugInIOOperationReadInput;
+    } else {
+        *willDo = operation == kAudioServerPlugInIOOperationWriteMix;
+    }
     *inPlace = true;
     return noErr;
 }
@@ -361,31 +512,22 @@ static OSStatus boundaryIO(AudioServerPlugInDriverRef driver, AudioObjectID devi
 static OSStatus doIO(AudioServerPlugInDriverRef driver, AudioObjectID device, AudioObjectID stream,
                      UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle,
                      void *main, void *secondary) {
-    if (!isDevice(device) || channelIndex(stream) != channelIndex(device) || !isStream(stream)) return kAudioHardwareBadObjectError;
+    int slot = deviceSlotIndex(device);
+    int ch = channelIndex(device);
+    if (slot < 0 || ch < 0 || stream != streamForDevice(device)) return kAudioHardwareBadObjectError;
     if (!main || !cycle) return kAudioHardwareIllegalOperationError;
-    Channel *channel = &gChannels[channelIndex(device)];
+    int64_t base = (int64_t)atomic_load_explicit(&gDevices[slot].baseFrame, memory_order_acquire);
+    ChannelRing *ring = &gChannels[ch];
     float *audio = main;
-    if (operation == kAudioServerPlugInIOOperationWriteMix && !isInput(stream)) {
-        int64_t start = (int64_t)cycle->mOutputTime.mSampleTime;
+    if (operation == kAudioServerPlugInIOOperationWriteMix && isSinkDevice(device)) {
+        int64_t start = base + openRayneoRoundSampleTime(cycle->mOutputTime.mSampleTime);
         for (UInt32 frame = 0; frame < frames; frame++) {
-            int64_t time = start + frame;
-            uint32_t index = (uint64_t)time % kRingFrames;
-            uint32_t bits;
-            memcpy(&bits, &audio[frame], sizeof(bits));
-            atomic_store_explicit(&channel->tags[index], INT64_MIN, memory_order_release);
-            atomic_store_explicit(&channel->samples[index], bits, memory_order_relaxed);
-            atomic_store_explicit(&channel->tags[index], time, memory_order_release);
+            openRayneoRingWriteFrame(ring->slots, start + (int64_t)frame, audio[frame]);
         }
-    } else if (operation == kAudioServerPlugInIOOperationReadInput && isInput(stream)) {
-        int64_t start = (int64_t)cycle->mInputTime.mSampleTime - kLoopbackFrames;
+    } else if (operation == kAudioServerPlugInIOOperationReadInput && isInputDevice(device)) {
+        int64_t start = base + openRayneoRoundSampleTime(cycle->mInputTime.mSampleTime) - kOpenRayneoLoopbackFrames;
         for (UInt32 frame = 0; frame < frames; frame++) {
-            int64_t time = start + frame;
-            uint32_t index = (uint64_t)time % kRingFrames;
-            audio[frame] = 0;
-            if (atomic_load_explicit(&channel->tags[index], memory_order_acquire) == time) {
-                uint32_t bits = atomic_load_explicit(&channel->samples[index], memory_order_relaxed);
-                if (atomic_load_explicit(&channel->tags[index], memory_order_acquire) == time) memcpy(&audio[frame], &bits, sizeof(bits));
-            }
+            audio[frame] = openRayneoRingReadFrame(ring->slots, start + (int64_t)frame);
         }
     }
     return noErr;

@@ -193,22 +193,85 @@ internal class GlassesDisplay(
 }
 
 internal object NavigationFrame {
-    fun isGrid(text: String): Boolean = text.split('\n').let { it.size == 5 && it.all { row -> row.length == 20 } }
+    fun isGrid(text: String): Boolean =
+        text.split('\n').let { rows ->
+            rows.size == 5 &&
+                rows.all { row ->
+                    row.length == 20 &&
+                        row.none { ch -> ch.isSurrogate() || Character.isISOControl(ch) }
+                }
+        }
+
     private fun grid(): Array<CharArray> = Array(5) { CharArray(20) { '　' } }
-    private fun put(rows: Array<CharArray>, text: String, x: Int, y: Int) {
-        text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ').take(20 - x).forEachIndexed { i, c ->
-            rows[y][x + i] = when (c) { ' ' -> '　'; in '!'..'~' -> (c.code + 0xfee0).toChar(); else -> c }
+
+    private fun toGridCellChar(codePoint: Int): Char? {
+        if (
+            codePoint == ' '.code ||
+                codePoint == '\n'.code ||
+                codePoint == '\r'.code ||
+                codePoint == '\t'.code ||
+                codePoint == 0x00a0 ||
+                codePoint == 0x3000
+        ) {
+            return '　'
+        }
+        if (
+            codePoint > 0xffff ||
+                Character.isISOControl(codePoint) ||
+                codePoint in 0x200b..0x200f ||
+                codePoint in 0xfe00..0xfe0f ||
+                codePoint == 0xfeff
+        ) {
+            return null
+        }
+        val category = Character.getType(codePoint).toByte()
+        if (
+            category == Character.NON_SPACING_MARK ||
+                category == Character.ENCLOSING_MARK ||
+                category == Character.COMBINING_SPACING_MARK ||
+                category == Character.FORMAT ||
+                category == Character.SURROGATE ||
+                category == Character.PRIVATE_USE ||
+                category == Character.UNASSIGNED
+        ) {
+            return null
+        }
+        return when (codePoint) {
+            in '!'.code..'~'.code -> (codePoint + 0xfee0).toChar()
+            '·'.code, '•'.code -> '．'
+            '—'.code, '–'.code, '―'.code -> '－'
+            '“'.code, '”'.code -> '＂'
+            '‘'.code, '’'.code -> '＇'
+            else -> codePoint.toChar()
         }
     }
+
+    private fun put(rows: Array<CharArray>, text: String, x: Int, y: Int) {
+        if (y !in rows.indices || x >= 20) return
+        var col = x.coerceAtLeast(0)
+        val iterator = text.codePoints().iterator()
+        while (iterator.hasNext() && col < 20) {
+            val cell = toGridCellChar(iterator.nextInt()) ?: continue
+            rows[y][col++] = cell
+        }
+    }
+
     private fun text(rows: Array<CharArray>) = rows.joinToString("\n") { String(it) }
+
     fun status(title: String, detail: String = ""): String = grid().let {
         put(it, title, 2, 1); put(it, detail, 2, 3); text(it)
     }
+
     fun render(direction: String, meters: Int, roadLabel: String = ""): String {
         val left = listOf("  █    ", " █     ", "██████ ", " █   █ ", "  █  █ ")
+        val keepLeft = listOf(" █     ", "███    ", " █ █   ", "   █   ", "   █   ")
         val arrow = when (direction) {
             "左转", "左前", "左后" -> left
             "右转", "右前", "右后" -> left.map { it.reversed() }
+            "靠左" -> keepLeft
+            "靠右" -> keepLeft.map { it.reversed() }
+            "环岛" -> listOf("  ███  ", " █   █ ", " █   █ ", "  ███  ", "   █   ")
+            "到达" -> listOf("  ███  ", " █ █ █ ", "  ███  ", "   █   ", "  ███  ")
             "掉头" -> listOf("  ████ ", " █   █ ", " █   █ ", "███  █ ", " █   █ ")
             "直行" -> listOf("   █   ", "  ███  ", " █████ ", "   █   ", "   █   ")
             else -> List(5) { "       " }

@@ -5,8 +5,22 @@ package com.openrayneo.android
 import java.io.ByteArrayOutputStream
 
 internal object ProtocolCodec {
-    data class Frame(val protocol: Int, val sequence: Int, val payload: ByteArray,
-                     val flags: Int = 0, val acknowledgement: Boolean = false)
+    private const val MAX_FRAME_BYTES = 65_541
+    private const val MAX_BUFFER_BYTES = MAX_FRAME_BYTES * 2
+
+    data class Frame(
+        val protocol: Int,
+        val sequence: Int,
+        val payload: ByteArray,
+        val flags: Int = 0,
+        val acknowledgement: Boolean = false,
+    ) {
+        val requiresAcknowledgement: Boolean
+            get() = !acknowledgement && (flags and 1 != 0)
+    }
+
+    fun protocolHeaderOffset(flags: Int): Int =
+        3 + (if (flags and 2 != 0) 1 else 0) + ((flags ushr 5) and 7)
 
     fun crc16(bytes: ByteArray): Int {
         var crc = 0
@@ -65,7 +79,7 @@ internal object ProtocolCodec {
         return frame(protocol, sequence, byteArrayOf(8, 1, 16) + varint(type) + byteArrayOf(26) + varint(bytes.size) + bytes)
     }
 
-    data class Message(val type: Int, val json: String?, val audio: ByteArray?)
+    data class Message(val type: Int, val json: String?, val audio: ByteArray?, val action: Int = -1)
 
     fun message(payload: ByteArray): Message {
         var offset = 0
@@ -79,13 +93,18 @@ internal object ProtocolCodec {
             }
             error("Protobuf 字段过长")
         }
+        var action = -1
         var type = -1
         var json: String? = null
         var audio: ByteArray? = null
         while (offset < payload.size) {
             val tag = variable()
             when (tag and 7) {
-                0 -> { val value = variable(); if (tag ushr 3 == 2) type = value }
+                0 -> {
+                    val value = variable()
+                    if (tag ushr 3 == 1) action = value
+                    if (tag ushr 3 == 2) type = value
+                }
                 2 -> {
                     val size = variable()
                     require(size >= 0 && size <= payload.size - offset) { "Protobuf 内容不完整" }
@@ -98,7 +117,7 @@ internal object ProtocolCodec {
                 else -> error("不支持的 Protobuf 类型")
             }
         }
-        return Message(type, json, audio)
+        return Message(type, json, audio, action)
     }
 
     private fun varint(value: Int): ByteArray {
@@ -120,7 +139,7 @@ internal object ProtocolCodec {
         private var pending = byteArrayOf()
 
         fun append(bytes: ByteArray): List<Frame> {
-            pending += bytes
+            if (bytes.isNotEmpty()) pending += bytes
             val frames = mutableListOf<Frame>()
             while (pending.size >= 4) {
                 val start = (0 until pending.size - 1).firstOrNull {
@@ -131,29 +150,49 @@ internal object ProtocolCodec {
                     pending = pending.takeLast(1).toByteArray()
                     break
                 }
-                pending = pending.copyOfRange(start, pending.size)
+                if (start > 0) pending = pending.copyOfRange(start, pending.size)
                 if (pending.size < 4) break
                 val length = u16(pending, 2)
-                if (length < 4) {
+                if (length < 4 || (pending.size >= 7 && length <= protocolHeaderOffset(pending[6].toInt() and 255))) {
                     pending = pending.copyOfRange(1, pending.size)
                     continue
                 }
                 val total = length + 6
-                if (pending.size < total) break
+                if (pending.size < total) {
+                    if (pending.size > MAX_FRAME_BYTES) {
+                        pending = pending.copyOfRange(1, pending.size)
+                        continue
+                    }
+                    break
+                }
                 val body = pending.copyOfRange(4, 4 + length)
                 if (crc16(body) != u16(pending, 4 + length)) {
                     pending = pending.copyOfRange(1, pending.size)
                     continue
                 }
                 val flags = body[2].toInt() and 255
-                val protocolOffset = 3 + (if (flags and 2 != 0) 1 else 0) + ((flags ushr 5) and 7)
-                if (protocolOffset < body.size) {
-                    frames += Frame(body[protocolOffset].toInt() and 255, u16(body, 0),
-                        body.copyOfRange(protocolOffset + 1, body.size), flags, pending[0] == 0x55.toByte())
+                val protocolOffset = protocolHeaderOffset(flags)
+                if (protocolOffset >= body.size) {
+                    pending = pending.copyOfRange(1, pending.size)
+                    continue
                 }
+                frames += Frame(
+                    body[protocolOffset].toInt() and 255,
+                    u16(body, 0),
+                    body.copyOfRange(protocolOffset + 1, body.size),
+                    flags,
+                    pending[0] == 0x55.toByte(),
+                )
                 pending = pending.copyOfRange(total, pending.size)
             }
+            if (pending.size > MAX_BUFFER_BYTES) {
+                pending = pending.copyOfRange(pending.size - MAX_FRAME_BYTES, pending.size)
+            }
             return frames
+        }
+
+        fun reset() {
+            pending = byteArrayOf()
         }
     }
 }

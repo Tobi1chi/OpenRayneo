@@ -53,7 +53,7 @@ internal class RayneoConnection(private val context: Context, private val listen
     private data class BleWrite(val bytes: ByteArray, val completion: String?)
     private val bleWrites = ArrayDeque<BleWrite>()
     private var bleWriting = false
-    private var generation = 0
+    @Volatile private var generation = 0
     private var bondReceiver: BroadcastReceiver? = null
     private var connectionStage = "等待连接"
     private val timeout = Runnable { fail("连接超时：$connectionStage") }
@@ -262,7 +262,7 @@ internal class RayneoConnection(private val context: Context, private val listen
                     if (frame.acknowledgement) {
                         if (bleOnly) log("收到 BLE 传输确认：seq=${frame.sequence}")
                     } else {
-                        if (frame.flags and 1 != 0) {
+                        if (frame.requiresAcknowledgement) {
                             enqueueBleFrame(ProtocolCodec.acknowledgement(frame), null)
                         }
                         if (frame.protocol == 0x10) processPairing(frame)
@@ -375,6 +375,16 @@ internal class RayneoConnection(private val context: Context, private val listen
                     val count = connection.inputStream.read(buffer)
                     check(count >= 0) { "眼镜关闭了数据流" }
                     val frames = decoder.append(buffer.copyOf(count))
+                    val acks = frames.filter { it.requiresAcknowledgement }
+                    if (acks.isNotEmpty()) {
+                        io.execute {
+                            if (session != generation || socket !== connection) return@execute
+                            runCatching {
+                                acks.forEach { connection.outputStream.write(ProtocolCodec.acknowledgement(it)) }
+                                connection.outputStream.flush()
+                            }
+                        }
+                    }
                     main.post {
                         if (session == generation) frames.forEach {
                             if (!it.acknowledgement) listener.onFrame(it, "SPP")

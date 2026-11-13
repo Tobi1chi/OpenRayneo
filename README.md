@@ -257,7 +257,7 @@ Use `/v1/recording/start` to record without ASR, or add `"record": true` to an A
 
 ### Two built-in virtual microphones for Codex
 
-The app bundles its own audio driver installer and Opus decoder. In **设备与 API**, install the built-in driver once with macOS administrator authentication; connection then automatically starts simultaneous forwarding to **OpenRayneo Microphone Channel 1** (wearer) and **Channel 2** (forward-facing). In Codex select Channel 1; another app can read Channel 2 at the same time. BlackHole and Background Music are not required. If the inputs do not appear after installation, restart the Mac and refresh devices.
+The app bundles its own audio driver installer and Opus decoder. In **设备与 API**, install the built-in driver once with macOS administrator authentication (the installer reloads `coreaudiod` automatically); connection then automatically starts simultaneous forwarding to **OpenRayneo Microphone Channel 1** (wearer) and **Channel 2** (forward-facing). In Codex select Channel 1; another app can read Channel 2 at the same time. BlackHole and Background Music are not required. Refresh devices after installation; if the inputs still do not appear, run `sudo killall coreaudiod` or restart the Mac.
 
 Forwarding does not save WAV files, run ASR, or change default audio devices. It shares the prompt page with answer updates and remains exclusive with ASR/recording. Desktop connection enables both channels by default; driver installation and duration settings live in **设备与 API**, with no separate microphone page. See [built-in driver setup, API, and validation limits](docs/virtual-microphone.md).
 
