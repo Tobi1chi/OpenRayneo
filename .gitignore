@@ -26,6 +26,8 @@ captures/
 recordings/
 analysis/
 
-# Runtime logs and macOS metadata
+# Runtime logs, Python bytecode cache, and macOS metadata
 *.log
+__pycache__/
+*.py[cod]
 .DS_Store

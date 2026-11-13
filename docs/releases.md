@@ -55,7 +55,12 @@ Future updates must use the same certificate. Keep a secure backup of the
 original build machine's `~/.android/debug.keystore`; never commit or upload it.
 A clean build machine generates a different debug certificate and its APK will
 not update existing installations. Compare signing certificates before upload.
-A future change to an unrelated release key requires a separate migration plan.
+To sign with a dedicated release keystore instead of the debug fallback, provide
+`OPENRAYNEO_KEYSTORE_FILE`, `OPENRAYNEO_KEYSTORE_PASSWORD`,
+`OPENRAYNEO_KEY_ALIAS`, and `OPENRAYNEO_KEY_PASSWORD` via environment variables
+or `android/local.properties`. Release builds also run R8 code/resource shrinking
+(`isMinifyEnabled` and `isShrinkResources`). A future change to an unrelated
+release key requires a separate migration plan.
 
 ## v1.0 scope and evidence
 

@@ -11,7 +11,7 @@ The **字符视频** desktop page imports a local movie and plays its image thro
 
 Before playback, **检查字符对齐** sends a fresh seven-row ruler without requiring a video import. Compare the left and right `｜` markers across blocks, blank cells, full-width letters, digits, and punctuation. The second row is intentionally blank between its markers. The wearer has confirmed that the full-width grayscale mode displays and aligns correctly on the tested glasses; the ruler remains useful for checking other devices or firmware.
 
-Playback is silent. The image fills the character canvas and may change the original aspect ratio. The complete video is decoded locally into small grayscale frames in memory, with no external decoder required.
+Playback is silent. By default the image fills the character canvas; enabling **保持原视频比例（黑边填充）** before importing letterboxes or pillarboxes the video to preserve its display aspect ratio across the 26×7 character grid. The complete video is decoded locally into small grayscale frames in memory, with no external decoder required.
 
 ## Rendering and scheduling
 
