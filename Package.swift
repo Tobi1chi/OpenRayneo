@@ -8,12 +8,21 @@ let package = Package(
     name: "OpenRayneoBridge",
     platforms: [.macOS(.v13)],
     products: [
+        .library(name: "OpenRayneoCore", targets: ["OpenRayneoCore"]),
         .executable(name: "openrayneo-bridge", targets: ["OpenRayneoBridge"])
     ],
     targets: [
+        .target(
+            name: "OpenRayneoCore",
+            linkerSettings: [.linkedFramework("IOBluetooth")]
+        ),
         .executableTarget(
             name: "OpenRayneoBridge",
-            linkerSettings: [.linkedFramework("IOBluetooth")]
+            dependencies: ["OpenRayneoCore"]
+        ),
+        .testTarget(
+            name: "OpenRayneoCoreTests",
+            dependencies: ["OpenRayneoCore"]
         )
     ]
 )

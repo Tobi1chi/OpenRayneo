@@ -123,7 +123,7 @@ private final class CommandLinePairing: NSObject, IOBluetoothDevicePairDelegate 
     }
 }
 
-func runPairingCommand(address: String, statusOnly: Bool) -> Int32 {
+public func runPairingCommand(address: String, statusOnly: Bool) -> Int32 {
     setbuf(stdout, nil)
     guard let device = IOBluetoothDevice(addressString: address) else {
         fputs("Invalid Bluetooth device address.\n", stderr)
@@ -143,7 +143,7 @@ func runPairingCommand(address: String, statusOnly: Bool) -> Int32 {
 }
 
 /// Removes only the requested Mac bond; this does not reset the glasses.
-func runUnpairingCommand(address: String) -> Int32 {
+public func runUnpairingCommand(address: String) -> Int32 {
     setbuf(stdout, nil)
     guard let device = IOBluetoothDevice(addressString: address) else {
         fputs("Invalid Bluetooth device address.\n", stderr)

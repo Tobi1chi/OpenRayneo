@@ -86,6 +86,7 @@ final class DesktopBridge: ObservableObject {
     @Published private(set) var videoPlaying = false
     @Published private(set) var videoSeconds = 0.0
     @Published private(set) var videoPreview = ""
+    @Published var preserveVideoAspectRatio = false
 
     var apiReady: Bool { serviceRunning && connected && apiVerifiedAt != nil }
     var selectedDevice: PairedGlasses? { devices.first { $0.id == selectedAddress } }
@@ -97,6 +98,7 @@ final class DesktopBridge: ObservableObject {
     private var service: Process?
     private var navigationFrameSent = false
     private var lastPromptContent: [String: Any]?
+    private var lastVideoURL: URL?
     private var videoImport: Task<Void, Never>?
     private var videoPlayback: Task<Void, Never>?
     private let pairing = BluetoothPairing()
@@ -221,13 +223,15 @@ final class DesktopBridge: ObservableObject {
 
     func loadVideo(_ url: URL) {
         guard !videoImporting, !videoPlaying, !busy, !stopping else { return }
+        lastVideoURL = url
+        let keepAspect = preserveVideoAspectRatio
         videoImporting = true
         errorMessage = nil
         notice = "正在解码视频：\(url.lastPathComponent)…"
         videoImport = Task {
             defer { videoImporting = false; videoImport = nil }
             do {
-                let video = try await TextVideo.load(url)
+                let video = try await TextVideo.load(url, preserveAspectRatio: keepAspect)
                 try Task.checkCancellation()
                 textVideo = video
                 videoSeconds = 0
@@ -236,6 +240,14 @@ final class DesktopBridge: ObservableObject {
             } catch is CancellationError {
                 notice = "已取消视频解码。"
             } catch { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func setPreserveVideoAspectRatio(_ enabled: Bool) {
+        guard preserveVideoAspectRatio != enabled else { return }
+        preserveVideoAspectRatio = enabled
+        if let url = lastVideoURL, !videoImporting, !videoPlaying, !busy, !stopping {
+            loadVideo(url)
         }
     }
 
@@ -437,7 +449,7 @@ final class DesktopBridge: ObservableObject {
             return
         }
         if NSWorkspace.shared.open(installer) {
-            notice = "请在系统安装器中完成内置驱动安装。返回后刷新设备；若未出现两路麦克风，请重新启动 Mac。"
+            notice = "请在系统安装器中完成内置驱动安装；安装完成后会自动重载音频服务，返回点击“刷新设备”即可。"
         } else { errorMessage = "无法打开内置驱动安装包。" }
     }
 

@@ -1,0 +1,81 @@
+{
+  "crc16_xmodem": [
+    {
+      "name": "empty",
+      "ascii": "",
+      "hex": "",
+      "crc16": 0
+    },
+    {
+      "name": "standard_123456789",
+      "ascii": "123456789",
+      "hex": "313233343536373839",
+      "crc16": 12739
+    },
+    {
+      "name": "rayneo_header",
+      "ascii": "",
+      "hex": "00010015",
+      "crc16": 30116
+    }
+  ],
+  "frames": {
+    "notification": {
+      "sequence": 7,
+      "protocol": 21,
+      "json": "{\"appId\":\"com.test\",\"content\":\"Hi\"}",
+      "hex": "aa55002f00070015080110021a237b226170704964223a22636f6d2e74657374222c22636f6e74656e74223a224869227d2200124d"
+    },
+    "display": {
+      "sequence": 42,
+      "protocol": 23,
+      "type": 5,
+      "json": "{\"sid\":\"abc\",\"status\":1}",
+      "hex": "aa550022002a0017080110051a187b22736964223a22616263222c22737461747573223a317db22c"
+    },
+    "pairing": {
+      "sequence": 3,
+      "protocol": 16,
+      "command": 24,
+      "hex": "aa5500130003001018000c10000401020304110002aabb40ed"
+    },
+    "acknowledgement": {
+      "sequence": 42,
+      "protocol": 23,
+      "hex": "55aa0004002a001723d1"
+    },
+    "extended_flags": {
+      "sequence": 258,
+      "protocol": 19,
+      "flags": 67,
+      "needs_ack": true,
+      "action": 2,
+      "type": 8,
+      "json": "{\"sid\":\"abc\",\"status\":1}",
+      "hex": "aa55002501024399a1a213080210081a187b22736964223a22616263222c22737461747573223a317dd751"
+    }
+  },
+  "stream_recovery": {
+    "hex": "ffaa550002aa550014deadaa550022002a0017080110051a187b22736964223a22616263222c22737461747573223a317db22caa55002501024399a1a213080210081a187b22736964223a22616263222c22737461747573223a317dd75155aa0004002a001723d1",
+    "expected_frames": [
+      {
+        "protocol": 23,
+        "sequence": 42,
+        "flags": 0,
+        "acknowledgement": false
+      },
+      {
+        "protocol": 19,
+        "sequence": 258,
+        "flags": 67,
+        "acknowledgement": false
+      },
+      {
+        "protocol": 23,
+        "sequence": 42,
+        "flags": 0,
+        "acknowledgement": true
+      }
+    ]
+  }
+}
