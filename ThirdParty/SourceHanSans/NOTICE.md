@@ -1,0 +1,1 @@
+SourceHanSansCN_Regular.ttf is the original Chinese fallback font supplied in RayNeo AI 1.0.10 assets/flutter_assets/assets/fonts/. Copyright 2014–2021 Adobe. Licensed under SIL Open Font License 1.1; see LICENSE.txt. The font is redistributed without modification.

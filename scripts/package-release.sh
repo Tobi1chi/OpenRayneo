@@ -5,7 +5,7 @@
 set -eu
 
 workspace_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$workspace_dir/Info.plist")
+version=$(/usr/libexec/PlistBuddy -c 'Print OpenRayneoReleaseVersion' "$workspace_dir/Info.plist")
 architecture=$(uname -m)
 release_dir="$workspace_dir/.build/distributions/$version-$architecture"
 app_dir="$release_dir/OpenRayneoBridge.app"
@@ -17,7 +17,7 @@ if [ -e "$release_dir" ]; then
     exit 1
 fi
 mkdir -p "$release_dir"
-OPENRAYNEO_APP_DIR="$app_dir" OPENRAYNEO_SIGNING_IDENTITY=- sh "$workspace_dir/scripts/build-app.sh"
+OPENRAYNEO_APP_DIR="$app_dir" sh "$workspace_dir/scripts/build-app.sh"
 plutil -lint "$app_dir/Contents/Info.plist"
 lipo "$app_dir/Contents/MacOS/openrayneo-bridge" -verify_arch "$architecture"
 codesign --verify --strict "$app_dir"

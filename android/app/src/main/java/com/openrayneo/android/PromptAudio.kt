@@ -92,16 +92,13 @@ internal class PromptAudio(private val consume: (ShortArray, ShortArray) -> Unit
         if (!state.active || packet.isEmpty()) return
         val current = generation
         state = state.copy(receivedPackets = state.receivedPackets + 1)
-        if (queued.incrementAndGet() > 16) { queued.decrementAndGet(); dropped.incrementAndGet(); return }
+        if (queued.incrementAndGet() > 256) { queued.decrementAndGet(); dropped.incrementAndGet(); return }
         worker.post {
             try {
                 if (current != generation) return@post
                 val decoder = codec ?: return@post
-                // The Opus TOC stereo bit describes encoded channels; do not duplicate mono into two sources.
-                if (decodeChannels == 2 && packet[0].toInt() and 4 == 0) {
-                    publish(current) { it.copy(error = "收到单声道数据，等待眼镜恢复双声道", left = 0.0, right = 0.0) }
-                    return@post
-                }
+                // RFC 6716 §2.1.2 permits mono-coded frames inside a stereo input stream.
+                // Do not drop or infer physical channel roles from the packet's TOC stereo bit.
                 val duration = packetDurationUs(packet)
                 drain(decoder, current)
                 val index = decoder.dequeueInputBuffer(5_000)
@@ -129,22 +126,26 @@ internal class PromptAudio(private val consume: (ShortArray, ShortArray) -> Unit
                 outputEncoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) format.getInteger(MediaFormat.KEY_PCM_ENCODING) else AudioFormat.ENCODING_PCM_16BIT
             } else if (index >= 0) {
                 try {
-                    check(outputChannels == decodeChannels && outputRate == 48_000 && outputEncoding == AudioFormat.ENCODING_PCM_16BIT) { "解码输出与请求的 PCM16 格式不符" }
+                    check(outputChannels in 1..2 && outputRate == 48_000 && outputEncoding == AudioFormat.ENCODING_PCM_16BIT) { "解码输出与请求的 PCM16 格式不符" }
                     if (info.size == 0) continue
                     val pcm = decoder.getOutputBuffer(index)!!.order(ByteOrder.LITTLE_ENDIAN)
                     pcm.position(info.offset); pcm.limit(info.offset + info.size)
                     val count = info.size / (2 * outputChannels)
-                    val left = ShortArray(count); val right = ShortArray(if (outputChannels == 2) count else 0)
+                    val actualChannels = outputChannels
+                    val left = ShortArray(count); val right = ShortArray(if (actualChannels == 2) count else 0)
                     var leftPower = 0.0; var rightPower = 0.0
                     for (i in 0 until count) {
                         left[i] = pcm.short
                         leftPower += left[i].toDouble() * left[i]
-                        if (outputChannels == 2) { right[i] = pcm.short; rightPower += right[i].toDouble() * right[i] }
+                        if (outputChannels == 2) {
+                            val value = pcm.short
+                            if (actualChannels == 2) { right[i] = value; rightPower += value.toDouble() * value }
+                        }
                     }
                     if (current != generation || count == 0) continue
                     publish(current) {
                         consume(left, right)
-                        it.copy(samples = it.samples + count, left = sqrt(leftPower / count) / 32768,
+                        it.copy(channels = actualChannels, samples = it.samples + count, left = sqrt(leftPower / count) / 32768,
                             right = sqrt(rightPower / count) / 32768, lastAudio = SystemClock.elapsedRealtime(),
                             dropped = dropped.get(), error = null)
                     }

@@ -7,11 +7,16 @@ import IOBluetooth
 import Foundation
 
 enum RayneoAdvertisement {
+    static func deviceType(_ advertisement: [String: Any]) -> String? {
+        guard let data = advertisement[CBAdvertisementDataManufacturerDataKey] as? Data,
+              data.count >= 9, Array(data.prefix(2)) == [0x16, 0x57], [6, 7].contains(data[2]) else { return nil }
+        return String(data[2])
+    }
     static func classicAddress(_ advertisement: [String: Any]) -> String? {
-        // Official APK S3.C0912a: company 0x5716, model 0x06, six address bytes.
+        // Official APK S3.C0912a: company 0x5716, model 0x06/0x07, six address bytes.
         // CoreBluetooth includes the little-endian company ID in manufacturer data.
         guard let data = advertisement[CBAdvertisementDataManufacturerDataKey] as? Data,
-              data.count >= 9, Array(data.prefix(3)) == [0x16, 0x57, 0x06] else { return nil }
+              data.count >= 9, deviceType(advertisement) != nil else { return nil }
         return data.dropFirst(3).prefix(6).map { String(format: "%02X", $0) }.joined(separator: "-")
     }
 }
@@ -46,7 +51,10 @@ extension PairedGlasses {
                         for (name, value) in entry where name.localizedCaseInsensitiveContains("RayNeo iO") {
                             if let info = value as? [String: Any], let address = info["device_address"] as? String {
                                 let normalized = address.replacingOccurrences(of: ":", with: "-")
-                                if !result.contains(where: { $0.id == normalized }) { result.append(PairedGlasses(id: normalized, name: name)) }
+                                let types = UserDefaults.standard.dictionary(forKey: "rayneoAdvertisementDeviceTypes") as? [String: String] ?? [:]
+                                if !result.contains(where: { $0.id == normalized }) {
+                                    result.append(PairedGlasses(id: normalized, name: name, deviceType: types[normalized]))
+                                }
                             }
                         }
                     }
@@ -55,6 +63,11 @@ extension PairedGlasses {
             return result
         }.value
     }
+}
+
+struct PairingOutcome {
+    let device: PairedGlasses
+    let intent: ConnectionIntent
 }
 
 /// Discovery stays in the UI; native pairing and status checks run in separate processes.
@@ -69,7 +82,8 @@ final class BluetoothPairing: NSObject, @preconcurrency CBCentralManagerDelegate
 
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {}
 
-    func pair(progress: (String, String) -> Void) async throws -> PairedGlasses? {
+    func pair(progress: (String, String) -> Void, preflight: ((PairedGlasses) async throws -> Void)? = nil,
+              prepareSystemPairing: (PairedGlasses) async throws -> Void) async throws -> PairingOutcome? {
         cancelled = false
         candidates = []
         defer { stopDiscovery(); dismissAlert() }
@@ -86,7 +100,12 @@ final class BluetoothPairing: NSObject, @preconcurrency CBCentralManagerDelegate
         scanning = true
         central?.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
         let scanStart = Date()
-        while Date().timeIntervalSince(scanStart) < (candidates.isEmpty ? 20 : 8) {
+        var firstCandidateAt: Date? = nil
+        while Date().timeIntervalSince(scanStart) < 20 {
+            if !candidates.isEmpty {
+                if firstCandidateAt == nil { firstCandidateAt = Date() }
+                if let firstCandidateAt, Date().timeIntervalSince(firstCandidateAt) >= 1 { break }
+            }
             try checkState()
             try await Task.sleep(nanoseconds: 200_000_000)
         }
@@ -105,21 +124,61 @@ final class BluetoothPairing: NSObject, @preconcurrency CBCentralManagerDelegate
             target = candidates[picker.indexOfSelectedItem]
         }
         try checkState()
-        progress("清除 Mac 旧配对", "正在移除 \(target.name) 的本地配对记录。请保持眼镜当前状态，不要同时操作系统蓝牙设置。")
-        _ = try await runHelper(["--unpair", target.id], timeout: 15)
-        progress("确认配对已清除", "正在独立确认眼镜在 Mac 上已未配对、未连接。")
-        let clean = try await pairingState(target.id)
-        guard !clean.paired, !clean.connected else {
-            throw PairingError(message: "Mac 仍保留配对或连接，已停止，未发起新配对。请在系统蓝牙设置中忽略目标眼镜后再试。")
-        }
-        progress("正在配对眼镜", "正在与 \(target.name) 建立新配对。请勿同时在系统设置中忽略设备或重新进入眼镜配对模式。")
-        _ = try await runHelper(["--pair", target.id], timeout: 35)
-        progress("确认系统配对", "配对助手已退出，正在独立确认配对记录。")
-        guard try await pairingState(target.id).paired else {
-            throw PairingError(message: "配对助手已结束，但 Mac 没有保存配对。请停止操作系统蓝牙设置，检查眼镜状态后再试。")
+        try await preflight?(target)
+        try checkState()
+        let existing = try await pairingState(target.id)
+        var needsPairing = !existing.paired
+        if existing.paired {
+            let prompt = NSAlert()
+            prompt.messageText = "这副眼镜已有 Mac 配对"
+            prompt.informativeText = "通常可直接使用现有配对。只有配对记录失效时才重新配对；重新配对会移除这副眼镜在 Mac 上的旧记录。"
+            prompt.addButton(withTitle: "使用现有配对")
+            prompt.addButton(withTitle: "重新配对")
+            prompt.addButton(withTitle: "取消")
+            switch await show(prompt) {
+            case .alertFirstButtonReturn: break
+            case .alertSecondButtonReturn:
+                progress("清除目标旧配对", "仅移除这副眼镜的 Mac 配对，保留眼镜内容和其他设备。")
+                _ = try await runHelper(["--unpair", target.id], timeout: 15)
+                let clean = try await pairingState(target.id)
+                guard !clean.paired, !clean.connected else { throw PairingError(message: "旧配对尚未移除，未启动新配对。") }
+                needsPairing = true
+            default: return nil
+            }
         }
         try checkState()
-        return target
+        if needsPairing {
+            // Official SDK plugin starts createBond only after BLE AUTH_SUCCESS.
+            // On Mac the preparation releases LE before the native pairing helper.
+            progress("正在注册眼镜连接", "先完成眼镜应用认证，再建立 Mac 系统配对。")
+            try await prepareSystemPairing(target)
+            try checkState()
+            progress("正在配对眼镜", "正在与 \(target.name) 建立配对。如出现数字或 PIN，请核对后完成；不要同时忽略设备。")
+            _ = try await runHelper(["--pair", target.id], timeout: 180)
+            progress("确认系统配对", "系统已报告配对完成，正在独立进程确认记录已保存。")
+            let deadline = Date().addingTimeInterval(8)
+            while !(try await pairingState(target.id).paired) {
+                try checkState()
+                guard Date() < deadline else { throw PairingError(message: "系统报告配对完成，但配对记录尚未保存。请保留当前状态，不必立即再次删除配对。") }
+                try await Task.sleep(nanoseconds: 300_000_000)
+            }
+        } else {
+            progress("保留现有配对", "使用已保存的配对建立设备通道。")
+        }
+        if let type = target.deviceType {
+            var types = UserDefaults.standard.dictionary(forKey: "rayneoAdvertisementDeviceTypes") as? [String: String] ?? [:]
+            types[target.id] = type
+            UserDefaults.standard.set(types, forKey: "rayneoAdvertisementDeviceTypes")
+        }
+        try checkState()
+        return PairingOutcome(device: target, intent: needsPairing ? .register : .reconnect)
+    }
+
+    func unpair(address: String) async throws {
+        cancelled = false
+        _ = try await runHelper(["--unpair", address], timeout: 15)
+        let state = try await pairingState(address)
+        guard !state.paired, !state.connected else { throw PairingError(message: "Mac 仍保留目标设备配对或连接。") }
     }
 
     private func pairingState(_ address: String) async throws -> (paired: Bool, connected: Bool) {
@@ -235,7 +294,9 @@ final class BluetoothPairing: NSObject, @preconcurrency CBCentralManagerDelegate
         guard scanning else { return }
         let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? peripheral.name ?? "RayNeo iO"
         guard let address = RayneoAdvertisement.classicAddress(advertisementData) else { return }
-        if !candidates.contains(where: { $0.id == address }) { candidates.append(PairedGlasses(id: address, name: name)) }
+        if !candidates.contains(where: { $0.id == address }) {
+            candidates.append(PairedGlasses(id: address, name: name, deviceType: RayneoAdvertisement.deviceType(advertisementData)))
+        }
     }
 
     private func show(_ prompt: NSAlert) async -> NSApplication.ModalResponse {

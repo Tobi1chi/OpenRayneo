@@ -12,6 +12,7 @@ private final class CommandLinePairing: NSObject, IOBluetoothDevicePairDelegate 
     private let stateLock = NSLock()
     private var result: IOReturn?
     private var needsInteraction = false
+    private var deadline = Date.distantFuture
     private let desktop = ProcessInfo.processInfo.environment["OPENRAYNEO_PAIRING_UI"] == "1"
     let device: IOBluetoothDevice
 
@@ -37,14 +38,27 @@ private final class CommandLinePairing: NSObject, IOBluetoothDevicePairDelegate 
         cancellation.setEventHandler { self.pair.stop(); exit(130) }
         cancellation.resume()
         defer { cancellation.cancel() }
+        // After BLE registration, DevicePair can stall before its baseband callback.
+        // Explicitly open the classic connection first using the public device API.
+        let baseband = device.openConnection(nil, withPageTimeout: 0x2000, authenticationRequired: false)
+        print("Classic connection result: \(baseband)")
+        guard baseband == kIOReturnSuccess else { return 1 }
+        if device.isPaired() {
+            print("System pairing completed while opening the classic connection.")
+            return 0
+        }
         print("Starting direct system pairing…")
         let started = pair.start()
         guard started == kIOReturnSuccess else {
             print("Pairing could not start: \(started)")
             return 1
         }
-        let deadline = Date().addingTimeInterval(25)
-        while !finished, Date() < deadline { RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1)) }
+        stateLock.lock(); deadline = Date().addingTimeInterval(60); stateLock.unlock()
+        while !finished {
+            stateLock.lock(); let expires = deadline; stateLock.unlock()
+            if Date() >= expires { break }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        }
         stateLock.lock()
         let result = self.result
         let needsInteraction = self.needsInteraction
@@ -52,7 +66,8 @@ private final class CommandLinePairing: NSObject, IOBluetoothDevicePairDelegate 
         if needsInteraction { return 2 }
         guard let result else { print("Pairing timed out."); return 1 }
         print("Pairing result: \(result); isPaired: \(device.isPaired())")
-        return result == kIOReturnSuccess && device.isPaired() ? 0 : 1
+        // Bond persistence is checked by the parent from a fresh process after helper cleanup.
+        return result == kIOReturnSuccess ? 0 : 1
     }
 
     func devicePairingStarted(_ sender: Any!) { print("Pairing started") }
@@ -63,6 +78,8 @@ private final class CommandLinePairing: NSObject, IOBluetoothDevicePairDelegate 
         result = error
         stateLock.unlock()
     }
+
+    private func allowUserInteraction() { stateLock.lock(); deadline = Date().addingTimeInterval(90); stateLock.unlock() }
 
     private func emit(_ event: String, value: String) {
         if let data = try? JSONSerialization.data(withJSONObject: ["event": event, "value": value]) {
@@ -78,6 +95,7 @@ private final class CommandLinePairing: NSObject, IOBluetoothDevicePairDelegate 
     }
 
     func devicePairingUserConfirmationRequest(_ sender: Any!, numericValue: BluetoothNumericValue) {
+        allowUserInteraction()
         let value = String(format: "%06u", numericValue)
         if desktop { emit("confirmation", value: value) }
         else {
@@ -92,6 +110,7 @@ private final class CommandLinePairing: NSObject, IOBluetoothDevicePairDelegate 
     }
 
     func devicePairingPINCodeRequest(_ sender: Any!) {
+        allowUserInteraction()
         guard desktop else {
             requireInteraction("PIN entry requires the desktop pairing assistant.")
             return
@@ -110,6 +129,7 @@ private final class CommandLinePairing: NSObject, IOBluetoothDevicePairDelegate 
     }
 
     func devicePairingUserPasskeyNotification(_ sender: Any!, passkey: BluetoothPasskey) {
+        allowUserInteraction()
         let value = String(format: "%06u", passkey)
         if desktop { emit("passkey", value: value) }
         else { print("Enter this passkey on the glasses: \(value)") }
@@ -134,10 +154,7 @@ func runPairingCommand(address: String, statusOnly: Bool) -> Int32 {
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]) { print(String(decoding: data, as: UTF8.self)) }
         return 0
     }
-    guard !device.isPaired(), !device.isConnected() else {
-        fputs("Pairing requires an unpaired, disconnected device. Run --unpair, then verify --pairing-status first.\n", stderr)
-        return 1
-    }
+    if device.isPaired() { print("Existing system pairing retained."); return 0 }
     guard let command = CommandLinePairing(device: device) else { return 1 }
     return command.run()
 }
@@ -149,6 +166,7 @@ func runUnpairingCommand(address: String) -> Int32 {
         fputs("Invalid Bluetooth device address.\n", stderr)
         return 1
     }
+    if !device.isPaired(), !device.isConnected() { print("Device is already unpaired and disconnected."); return 0 }
     // IOBluetooth does not expose unpairing in its public SDK. This native selector
     // is also used by blueutil's experimental --unpair implementation.
     let selector = NSSelectorFromString("remove")

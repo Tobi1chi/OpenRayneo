@@ -39,9 +39,7 @@ internal fun AssistantScreen(model: AppModel, actions: UiActions, configure: (St
     val history = if (mobile) model.phoneHistory else model.computerHistory
     val configured =
         if (mobile)
-            listOf("modelUrl", "modelName", "modelKey").all {
-                model.config.optString(it).isNotBlank()
-            }
+            s.agentServer.enabled
         else listOf("codexUrl", "codexToken").all { model.config.optString(it).isNotBlank() }
     val draft = if (mobile) model.phoneDraft else model.computerDraft
     val inputReady = s.available && configured && (mobile || s.computerConnected) && !running
@@ -71,7 +69,7 @@ internal fun AssistantScreen(model: AppModel, actions: UiActions, configure: (St
                     bottomStart = 8.dp,
                 ),
             ) {
-                Text(if (s.phoneRunning) "手机模型 · 处理中" else "手机模型")
+                Text(if (s.phoneRunning) "本机 Agent · 处理中" else "本机 Agent")
             }
             SegmentedButton(
                 !mobile,
@@ -93,7 +91,7 @@ internal fun AssistantScreen(model: AppModel, actions: UiActions, configure: (St
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                if (mobile && configured && question.isBlank() && !running) "模型配置已保存 · 可以开始提问"
+                if (mobile && configured && question.isBlank() && !running) "任务交给本机 Agent · 请保持 DSH Go 插件运行"
                 else status,
                 Modifier.weight(1f),
                 style = MaterialTheme.typography.labelMedium,
@@ -123,15 +121,15 @@ internal fun AssistantScreen(model: AppModel, actions: UiActions, configure: (St
                             tint = MaterialTheme.colorScheme.primary,
                         )
                         Text(
-                            if (mobile) "手机模型尚未配置" else "电脑尚未配置",
+                            if (mobile) "请启用本机 Agent 入口" else "电脑尚未配置",
                             style = MaterialTheme.typography.headlineSmall,
                         )
                         Note(
-                            if (mobile) "连接自己的模型服务，在手机上独立问答。也可以查询导航跟随状态或发送眼镜通知。"
+                            if (mobile) "启用本机入口并在 DSH Go 连接眼镜。回复、短提示与任务由本机 Agent 处理。"
                             else "连接电脑上的 Codex，查看任务进度，在这里完成审批并接收回答。"
                         )
-                        ToolButton(onClick = { configure(if (mobile) "model" else "computer") }) {
-                            Text(if (mobile) "配置手机模型" else "配置电脑连接")
+                        ToolButton(onClick = { configure(if (mobile) "agent-api" else "computer") }) {
+                            Text(if (mobile) "配置本机 Agent" else "配置电脑连接")
                         }
                     }
                 }
@@ -242,7 +240,7 @@ internal fun AssistantScreen(model: AppModel, actions: UiActions, configure: (St
                         draft,
                         { if (mobile) model.phoneDraft = it else model.computerDraft = it },
                         Modifier.weight(1f),
-                        placeholder = { Text(if (mobile) "问问手机模型…" else "交给电脑的任务…") },
+                        placeholder = { Text(if (mobile) "交给本机 Agent 的任务…" else "交给电脑的任务…") },
                         maxLines = 5,
                         shape = MaterialTheme.shapes.large,
                     )
@@ -264,7 +262,7 @@ internal fun AssistantScreen(model: AppModel, actions: UiActions, configure: (St
                         ) {
                             Icon(
                                 Icons.AutoMirrored.Outlined.Send,
-                                "发送至${if (mobile) "手机模型" else "电脑 Codex"}",
+                                "发送至${if (mobile) "本机 Agent" else "电脑 Codex"}",
                             )
                         }
                 }
@@ -282,7 +280,7 @@ internal fun AssistantScreen(model: AppModel, actions: UiActions, configure: (St
                         Text("手机语音输入", style = MaterialTheme.typography.labelMedium)
                     }
                     Text(
-                        if (mobile) "发送至手机模型" else "发送至电脑 Codex",
+                        if (mobile) "发送至本机 Agent" else "发送至电脑 Codex",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

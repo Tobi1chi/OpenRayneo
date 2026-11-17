@@ -31,7 +31,7 @@ internal object GlassesCoordinator {
         fun showAnswer(content: AnswerContent) {
             val target = when (val intent = state.intent) {
                 DisplayIntent.Navigation -> ReturnTarget.NAVIGATION
-                DisplayIntent.PromptStandby -> ReturnTarget.PROMPT_STANDBY
+                DisplayIntent.PromptStandby, DisplayIntent.BlankPrompt -> ReturnTarget.PROMPT_STANDBY
                 is DisplayIntent.Answer -> intent.returnTo
                 DisplayIntent.Idle -> ReturnTarget.IDLE
             }
@@ -41,7 +41,9 @@ internal object GlassesCoordinator {
         when (event) {
             GlassesEvent.BeginConnection -> {
                 resetSession()
-                setIntent(if (state.navigation.enabled) DisplayIntent.Navigation else DisplayIntent.PromptStandby)
+                setIntent(DisplayIntent.Idle)
+                state = state.copy(navigation = state.navigation.copy(enabled = false, frame = null))
+                effects += GlassesEffect.StopFollowing
                 state = state.copy(link = LinkState(LinkPhase.CONNECTING, "正在连接眼镜"), disconnecting = false)
             }
             is GlassesEvent.LinkChanged -> {
@@ -54,12 +56,7 @@ internal object GlassesCoordinator {
                 if (state.disconnecting && event.state.phase == LinkPhase.DISCONNECTED) state = state.copy(disconnecting = false)
             }
             is GlassesEvent.NavigationChanged -> {
-                val newlyFollowing = !state.navigation.enabled && event.state.enabled
                 state = state.copy(navigation = event.state)
-                // Preserve first-use auto-selection only while the connection's default page owns the display.
-                if (newlyFollowing && state.intent == DisplayIntent.PromptStandby && state.ownership == DisplayOwnership.APP && !state.disconnecting) {
-                    setIntent(DisplayIntent.Navigation)
-                }
             }
             is GlassesEvent.SelectNavigation -> {
                 setIntent(DisplayIntent.Navigation)
@@ -75,8 +72,16 @@ internal object GlassesCoordinator {
                 state = state.copy(ownership = owner, navigation = state.navigation.copy(enabled = false, frame = null))
                 effects += GlassesEffect.StopFollowing
             }
+            is GlassesEvent.ForgetAnswer -> {
+                if (state.answer?.ref?.source == event.source) state = state.copy(answer = null)
+                val intent = state.intent as? DisplayIntent.Answer
+                if (intent?.ref?.source == event.source) setIntent(returnIntent(intent.returnTo))
+            }
             GlassesEvent.PauseDisplay -> setIntent(DisplayIntent.Idle)
             GlassesEvent.OpenStandby -> setIntent(DisplayIntent.PromptStandby)
+            GlassesEvent.ClearDisplay -> if (state.session?.mode == PageMode.PROMPT && state.ownership == DisplayOwnership.APP) {
+                setIntent(DisplayIntent.BlankPrompt)
+            }
             GlassesEvent.RetryAudio -> state.session?.takeIf {
                 state.link.phase == LinkPhase.FULL && state.ownership == DisplayOwnership.APP &&
                     !state.disconnecting && it.phase in setOf(PagePhase.LAYOUT, PagePhase.SETTLING, PagePhase.READY)
@@ -88,6 +93,8 @@ internal object GlassesCoordinator {
             GlassesEvent.DismissAnswer -> (state.intent as? DisplayIntent.Answer)?.let { setIntent(returnIntent(it.returnTo)) }
             GlassesEvent.Disconnect -> {
                 setIntent(DisplayIntent.Idle)
+                state = state.copy(navigation = state.navigation.copy(enabled = false, frame = null))
+                effects += GlassesEffect.StopFollowing
                 state = state.copy(disconnecting = true)
             }
             is GlassesEvent.AnswerRequested -> state = state.copy(answerPermit = AnswerPermit(event.ref, state.revision))
@@ -189,6 +196,7 @@ internal object GlassesCoordinator {
         if (state.disconnecting || state.ownership != DisplayOwnership.APP) return null
         return when (val intent = state.intent) {
             DisplayIntent.Idle -> null
+            DisplayIntent.BlankPrompt -> PageMode.PROMPT to PageContent("blank", "　", "　")
             DisplayIntent.PromptStandby -> PageMode.PROMPT to PageContent("standby", "OpenRayneo", "实时提示已就绪")
             DisplayIntent.Navigation -> state.navigation.frame?.takeIf { state.navigation.enabled }?.let {
                 PageMode.NAVIGATION to PageContent("navigation", it)

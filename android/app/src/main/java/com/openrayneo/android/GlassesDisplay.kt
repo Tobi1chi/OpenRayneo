@@ -144,10 +144,10 @@ internal class GlassesDisplay(
         if (content == lastWritten) return
         writing = true
         val text = (if (active.mode == PageMode.NAVIGATION && navigationFrameSent) "\u3000" else "") + content.text
-        val fields = JSONObject().put("source_transcript", text)
-        if (active.mode == PageMode.PROMPT) fields.put("target_translation", content.answer.orEmpty()).put("keyword_info", JSONObject.NULL).put("label", 0)
-        send(protocol(active.mode), 5, JSONObject().put("sid", id).put("mode", if (active.mode == PageMode.NAVIGATION) 3 else 4)
-            .put("status", 1).put("content", fields)) { result ->
+        val payload = if (active.mode == PageMode.NAVIGATION) NavigationFrame.result(id, text)
+            else JSONObject().put("sid", id).put("mode", 4).put("status", 1).put("content", JSONObject()
+                .put("source_transcript", text).put("target_translation", content.answer.orEmpty()).put("keyword_info", JSONObject.NULL).put("label", 0))
+        send(protocol(active.mode), 5, payload) { result ->
             if (sid != id) return@send
             writing = false
             if (result.isSuccess) {
@@ -193,6 +193,9 @@ internal class GlassesDisplay(
 }
 
 internal object NavigationFrame {
+    // A maneuver is always a complete frame. Partial ASR results must not share this path.
+    fun result(sid: String, text: String) = JSONObject().put("sid", sid).put("mode", 3).put("status", 1)
+        .put("content", JSONObject().put("source_transcript", text))
     fun isGrid(text: String): Boolean = text.split('\n').let { it.size == 5 && it.all { row -> row.length == 20 } }
     private fun grid(): Array<CharArray> = Array(5) { CharArray(20) { '　' } }
     private fun put(rows: Array<CharArray>, text: String, x: Int, y: Int) {

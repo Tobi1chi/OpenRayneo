@@ -9,6 +9,7 @@ internal enum class ReturnTarget { IDLE, PROMPT_STANDBY, NAVIGATION }
 internal sealed interface DisplayIntent {
     data object Idle : DisplayIntent
     data object PromptStandby : DisplayIntent
+    data object BlankPrompt : DisplayIntent
     data object Navigation : DisplayIntent
     data class Answer(val ref: AnswerRef, val returnTo: ReturnTarget) : DisplayIntent
 }
@@ -55,6 +56,7 @@ internal data class GlassesState(
         session.phase == PagePhase.SETTLING -> "页面已确认，正在发送内容"
         session.writtenContent != session.content -> "正在更新眼镜内容"
         session.mode == PageMode.NAVIGATION -> "导航会话已就绪"
+        intent == DisplayIntent.BlankPrompt -> "屏幕已清空，收音保持开启"
         intent is DisplayIntent.Answer -> "回答会话已就绪"
         else -> "实时提示会话已就绪"
     }
@@ -76,6 +78,8 @@ internal sealed interface GlassesEvent {
     data object StopNavigation : GlassesEvent
     data object PauseDisplay : GlassesEvent
     data object OpenStandby : GlassesEvent
+    data object ClearDisplay : GlassesEvent
+    data class ForgetAnswer(val source: AnswerSource) : GlassesEvent
     data object RetryAudio : GlassesEvent
     data object DismissAnswer : GlassesEvent
     data object Disconnect : GlassesEvent

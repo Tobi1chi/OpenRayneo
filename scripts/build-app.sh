@@ -23,11 +23,27 @@ if [ "$signing_identity" = - ]; then
     printf '%s\n' 'Warning: ad-hoc signing; rebuilding may require Bluetooth and Speech authorization again.' >&2
 fi
 
+sh "$workspace_dir/scripts/prepare-mac-voice.sh"
+OPENRAYNEO_VOICE_MODELS_ONLY=1 sh "$workspace_dir/scripts/prepare-android-voice.sh"
 swift build --package-path "$workspace_dir" --configuration release
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Contents/Frameworks"
 cp "$workspace_dir/.build/release/openrayneo-bridge" "$app_dir/Contents/MacOS/openrayneo-bridge"
 cp "$workspace_dir/Info.plist" "$app_dir/Contents/Info.plist"
 cp "$workspace_dir/assets/icons/OpenRayneo.icns" "$app_dir/Contents/Resources/OpenRayneo.icns"
+mkdir -p "$app_dir/Contents/Resources/AgentSkill/openrayneo-api"
+cp -R "$workspace_dir/.agents/skills/openrayneo-api/." "$app_dir/Contents/Resources/AgentSkill/openrayneo-api/"
+cp "$workspace_dir/docs/runbook.md" "$app_dir/Contents/Resources/Usage.md"
+cp "$workspace_dir/LICENSE" "$app_dir/Contents/Resources/LICENSE"
+mkdir -p "$app_dir/Contents/Resources/DashboardFonts"
+cp "$workspace_dir/assets/fonts/"*.ttf "$app_dir/Contents/Resources/DashboardFonts/"
+cp "$workspace_dir/ThirdParty/RobotoCondensed/LICENSE" "$app_dir/Contents/Resources/DashboardFonts/LICENSE"
+cp "$workspace_dir/ThirdParty/RobotoCondensed/NOTICE.md" "$app_dir/Contents/Resources/DashboardFonts/NOTICE.md"
+cp "$workspace_dir/ThirdParty/SourceHanSans/LICENSE.txt" "$app_dir/Contents/Resources/DashboardFonts/SourceHanSans-LICENSE.txt"
+cp "$workspace_dir/ThirdParty/SourceHanSans/NOTICE.md" "$app_dir/Contents/Resources/DashboardFonts/SourceHanSans-NOTICE.md"
+mkdir -p "$app_dir/Contents/Resources/DashboardIcons"
+cp "$workspace_dir/assets/dashboard-preview/"*.pdf "$app_dir/Contents/Resources/DashboardIcons/"
+cp "$workspace_dir/assets/dashboard-preview/"*.png "$app_dir/Contents/Resources/DashboardIcons/"
+cp "$workspace_dir/assets/dashboard-preview/NOTICE.md" "$app_dir/Contents/Resources/DashboardIcons/NOTICE.md"
 OPENRAYNEO_SIGNING_IDENTITY="$signing_identity" sh "$workspace_dir/scripts/build-audio-driver.sh"
 OPENRAYNEO_DRIVER_PACKAGE="$app_dir/Contents/Resources/OpenRayneoAudio.pkg" sh "$workspace_dir/scripts/package-audio-driver.sh"
 
@@ -48,6 +64,27 @@ cp "$opus_library" "$app_dir/Contents/Frameworks/libopus.dylib"
 install_name_tool -id @rpath/libopus.dylib "$app_dir/Contents/Frameworks/libopus.dylib"
 codesign --force --sign "$signing_identity" "$app_dir/Contents/Frameworks/libopus.dylib"
 cp "$workspace_dir/ThirdParty/opus/COPYING" "$app_dir/Contents/Resources/opus-COPYING"
+mkdir -p "$app_dir/Contents/Resources/VoiceModels" "$app_dir/Contents/Resources/VoiceLicenses"
+chmod -R u+w "$app_dir/Contents/Resources/VoiceLicenses"
+cp "$workspace_dir/android/app/src/main/assets/voice-models/"*.onnx "$app_dir/Contents/Resources/VoiceModels/"
+cp "$workspace_dir/ThirdParty/SherpaOnnx/"* "$app_dir/Contents/Resources/VoiceLicenses/"
+cp "$workspace_dir/ThirdParty/WhisperKit/LICENSE" "$app_dir/Contents/Resources/VoiceLicenses/WhisperKit-LICENSE"
+cp "$workspace_dir/ThirdParty/WhisperKit/WHISPER-LICENSE" "$app_dir/Contents/Resources/VoiceLicenses/Whisper-LICENSE"
+cp "$workspace_dir/ThirdParty/WhisperKit/NOTICES" "$app_dir/Contents/Resources/VoiceLicenses/WhisperKit-NOTICES"
+for library in libsherpa-onnx-c-api.dylib libonnxruntime.dylib; do
+    if [ -f "$app_dir/Contents/Frameworks/$library" ]; then chmod u+w "$app_dir/Contents/Frameworks/$library"; fi
+    cp "$workspace_dir/.build/local-voice/lib/$library" "$app_dir/Contents/Frameworks/$library"
+    install_name_tool -id "@rpath/$library" "$app_dir/Contents/Frameworks/$library"
+    if [ "$library" = libsherpa-onnx-c-api.dylib ]; then
+        dependency=$(otool -L "$app_dir/Contents/Frameworks/$library" | awk '/@rpath\/libonnxruntime/ { print $1; exit }')
+        if [ -n "$dependency" ] && [ "$dependency" != @rpath/libonnxruntime.dylib ]; then
+            install_name_tool -change "$dependency" @rpath/libonnxruntime.dylib "$app_dir/Contents/Frameworks/$library"
+        fi
+    fi
+    codesign --force --sign "$signing_identity" "$app_dir/Contents/Frameworks/$library"
+done
+install_name_tool -delete_rpath "$workspace_dir/.build/local-voice/lib" "$app_dir/Contents/MacOS/openrayneo-bridge"
+codesign --force --sign "$signing_identity" "$app_dir/Contents/MacOS/openrayneo-bridge"
 codesign --force --sign "$signing_identity" --identifier com.openrayneo.bridge "$app_dir"
 codesign --verify --strict "$app_dir"
 printf 'Built %s\n' "$app_dir"

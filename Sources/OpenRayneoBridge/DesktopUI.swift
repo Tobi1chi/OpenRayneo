@@ -5,17 +5,33 @@ import AppKit
 import SwiftUI
 
 private enum ControlPage: String, CaseIterable, Identifiable {
-    case setup = "设备与 API", navigation = "导航演示", video = "字符视频", text = "文字显示", notification = "通知", teleprompter = "提词器", audio = "语音与录音"
+    case workspace = "Agent 工作台", setup = "设备连接", officialAccount = "官方账号", settings = "眼镜设置", homeContent = "首页内容", dashboardCards = "首页预览与布局", nativeRecording = "原生录音", recordingLibrary = "录音资料库", memory = "回忆与项目", files = "文件传输", maintenance = "固件与日志", feedback = "问题反馈", navigation = "导航演示", video = "字符视频", text = "文字显示", notification = "通知", teleprompter = "提词器", audio = "语音与录音", assistant = "AI 助手"
+    case voice = "声音与说话人"
+    case ota = "固件升级"
     var id: String { rawValue }
     var icon: String {
         switch self {
+        case .voice: return "person.wave.2"
+        case .ota: return "arrow.down.doc"
+        case .workspace: return "terminal"
         case .setup: return "link"
+        case .officialAccount: return "person.crop.circle"
+        case .settings: return "gearshape"
+        case .nativeRecording: return "record.circle"
+        case .recordingLibrary: return "waveform.and.magnifyingglass"
+        case .memory: return "books.vertical"
+        case .files: return "arrow.up.arrow.down"
+        case .dashboardCards: return "rectangle.grid.1x2"
+        case .maintenance: return "wrench.and.screwdriver"
+        case .feedback: return "bubble.left.and.exclamationmark.bubble.right"
+        case .homeContent: return "square.grid.2x2"
         case .navigation: return "arrow.turn.up.right"
         case .video: return "film"
         case .text: return "text.bubble"
         case .notification: return "bell"
         case .teleprompter: return "doc.text"
         case .audio: return "waveform"
+        case .assistant: return "sparkles"
         }
     }
 }
@@ -23,7 +39,7 @@ private enum ControlPage: String, CaseIterable, Identifiable {
 @MainActor
 private struct DesktopControlView: View {
     @ObservedObject var bridge: DesktopBridge
-    @State private var page: ControlPage = .setup
+    @State private var page: ControlPage = .workspace
     @State private var direction: NavigationDirection = .uturn
     @State private var meters = 100
     @State private var videoStyle: TextVideoStyle = .fullWidth
@@ -34,17 +50,17 @@ private struct DesktopControlView: View {
     @State private var caption = "你好，OpenRayneo。\n这段文字来自 Mac 控制面板。"
     @State private var answer = ""
     @State private var usePrompt = true
+    @State private var finalText = true
+    @State private var clearAfterSending = false
+    @State private var clearAfterSeconds = 10
     @State private var notificationTitle = "OpenRayneo"
     @State private var notificationBody = "来自 Mac 的通知"
-    @State private var scriptTitle = "我的提词稿"
-    @State private var scriptText = ""
-    @State private var scriptSpeed = 60
     @State private var locale = "zh-CN"
     @State private var audioDuration = 60
     @State private var saveAudio = false
     @State private var saveLifeLogAudio = true
 
-    private var unavailable: Bool { bridge.busy || bridge.stopping }
+    private var unavailable: Bool { bridge.busy || bridge.stopping || bridge.officialDeviceOperationActive }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -54,7 +70,7 @@ private struct DesktopControlView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(page.rawValue).font(.title2.weight(.semibold))
-                        Text(bridge.activeSession.map { "当前功能：\($0.title)" } ?? "准备好后发送到眼镜")
+                        Text(page == .officialAccount ? "管理雷鸟官方会话和云端设备" : page == .feedback ? "向官方反馈问题，管理本地草稿与附件" : page == .workspace ? "本机服务 · 按需收音 · Agent 控制" : bridge.activeSession.map { "当前功能：\($0.title)" } ?? "准备好后发送到眼镜")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -72,15 +88,43 @@ private struct DesktopControlView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         switch page {
+                        case .workspace: AgentWorkspacePanel(bridge: bridge)
                         case .setup: setupPanel
+                        case .officialAccount:
+                            OfficialAccountPanel()
+                            OfficialCloudDevicesPanel(model: bridge.cloudDevices)
+                        case .settings: GlassesSettingsPanel(model: bridge.glassesSettings, openDashboard: { page = .dashboardCards })
+                        case .nativeRecording: NativeRecordingPanel(model: bridge.nativeRecording)
+                        case .recordingLibrary: RecordingLibraryPanel(model: bridge.recordingLibrary)
+                        case .voice: LocalVoicePanel(bridge: bridge, model: bridge.voiceLab, asr: bridge.localASR)
+                        case .memory:
+                            MemoryLibraryPanel(model: bridge.memoryLibrary, openRecording: { id in
+                                bridge.recordingLibrary.selectedID = id
+                                page = .recordingLibrary
+                            })
+                        case .files: FileTransfersPanel(model: bridge.files)
+                        case .dashboardCards:
+                            DashboardHomePanel(bridge: bridge)
+                        case .maintenance:
+                            MaintenancePanel(model: bridge.maintenance)
+                        case .ota: OTAUpdatePanel(model: bridge.ota)
+                        case .feedback: OfficialFeedbackPanel(model: bridge.feedback)
+                        case .homeContent:
+                            CurrentLocationWeatherPanel(model: bridge.currentLocationWeather)
+                            HomeContentPanel(model: bridge.homeContent, schedules: bridge.schedules, calendarSync: bridge.calendarSync)
                         case .navigation: navigationPanel
                         case .video: videoPanel
                         case .text: textPanel
-                        case .notification: notificationPanel
-                        case .teleprompter: teleprompterPanel
-                        case .audio: audioPanel
+                        case .notification:
+                            notificationPanel
+                            NotificationMirrorPanel(model: bridge.notificationMirror)
+                        case .teleprompter: TeleprompterLibraryPanel(model: bridge.teleprompterLibrary)
+                        case .audio:
+                            audioPanel
+                            CaptionSettingsPanel(model: bridge.captionSettings)
+                        case .assistant: AssistantPanel(model: bridge.assistant, bridge: bridge)
                         }
-                        connectionHelp
+                        if page == .setup { connectionHelp }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Divider()
@@ -91,11 +135,28 @@ private struct DesktopControlView: View {
                 }.frame(minHeight: 24)
             }.padding(24)
         }.frame(minWidth: 900, minHeight: 630)
+        .onChange(of: bridge.nativeWakeID) { id in
+            guard id != nil, bridge.nativeAssistantActive else { return }
+            page = .assistant
+            if UserDefaults.standard.bool(forKey: "nativeWakeAutoCapture") { bridge.assistant.answerNativeWake(bridge: bridge) }
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first(where: { $0.title == "OpenRayneo" })?.makeKeyAndOrderFront(nil)
+        }
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Label("OpenRayneo", systemImage: "eyeglasses").font(.title3.weight(.semibold))
+        ScrollView { sidebarContent }
+            .frame(width: 240).frame(maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var sidebarContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("OpenRayneo", systemImage: "eyeglasses").font(.title3.weight(.semibold))
+                Spacer()
+                Text("Beta 1").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+            }
             HStack(spacing: 7) {
                 Circle().fill(bridge.connected ? Color.green : Color.secondary.opacity(0.45)).frame(width: 7, height: 7)
                 Text(bridge.phase).font(.callout)
@@ -117,7 +178,8 @@ private struct DesktopControlView: View {
                     if !bridge.connected {
                         Button("重新连接") { bridge.connect() }.disabled(unavailable)
                     }
-                    Button(bridge.stopping ? "正在断开…" : "断开连接") { bridge.disconnect() }.disabled(bridge.stopping)
+                    Button(bridge.stopping ? "正在断开…" : "断开连接") { bridge.disconnect() }
+                        .disabled(bridge.stopping || bridge.officialDeviceOperationActive)
                 } else {
                     Button("连接眼镜") { bridge.connect() }
                         .buttonStyle(.borderedProminent).disabled(bridge.selectedAddress.isEmpty || unavailable)
@@ -132,18 +194,29 @@ private struct DesktopControlView: View {
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
             }
             Divider()
-            ForEach(ControlPage.allCases) { item in
+            ForEach(["工作台", "眼镜", "内容", "进阶工具"], id: \.self) { group in
+                Text(group).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(pages(in: group)) { item in
                 Button { page = item } label: {
                     Label(item.rawValue, systemImage: item.icon)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8).padding(.horizontal, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 5).padding(.horizontal, 10)
                         .background(page == item ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
                 }.buttonStyle(.plain)
+                }
             }
             Spacer()
             Text("手机占用连接时，请先关闭手机蓝牙。")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }.padding(18).frame(width: 240).frame(maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
+        }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func pages(in group: String) -> [ControlPage] {
+        switch group {
+        case "工作台": return [.workspace, .assistant, .text]
+        case "眼镜": return [.setup, .settings, .dashboardCards, .homeContent, .ota]
+        case "内容": return [.notification, .teleprompter, .nativeRecording, .recordingLibrary, .voice, .memory]
+        default: return [.audio, .files, .maintenance, .navigation, .video]
+        }
     }
 
     private var setupPanel: some View {
@@ -153,7 +226,7 @@ private struct DesktopControlView: View {
             HStack {
                 Button("添加并配对眼镜", systemImage: "plus") { bridge.pairAndConnect() }
                     .disabled(unavailable || bridge.refreshingDevices)
-                Text("先清除目标眼镜在 Mac 上的旧配对，再配对并启用 API。").font(.caption).foregroundStyle(.secondary)
+                Text("已有配对可保留使用；需要修复时可明确选择重新配对。").font(.caption).foregroundStyle(.secondary)
             }
             if bridge.pairingActive {
                 Text("请保持眼镜开机、手机蓝牙关闭。开始后不要同时忽略 Mac 配对或重新进入眼镜配对模式；如弹出数字，请核对。")
@@ -170,7 +243,7 @@ private struct DesktopControlView: View {
             Button(bridge.restartingService ? "正在重启连接服务…" : "重启连接服务", systemImage: "arrow.clockwise") {
                 bridge.restartConnectionService()
             }
-            .disabled(bridge.selectedAddress.isEmpty || bridge.stopping || bridge.restartingService || bridge.pairingActive || bridge.refreshingDevices)
+            .disabled(bridge.selectedAddress.isEmpty || bridge.stopping || bridge.restartingService || bridge.pairingActive || bridge.refreshingDevices || bridge.officialDeviceOperationActive)
             Text("连接卡住时可重启服务，窗口保持打开、系统配对保留。当前显示或录音会话会结束，API 地址和令牌可能更新。")
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
@@ -250,13 +323,24 @@ private struct DesktopControlView: View {
             if usePrompt {
                 Text("回答正文").font(.headline)
                 editor($answer, height: 120)
-                Text(bridge.builtInMicrophonesReady ? "实时提示默认同时转送两路麦克风，更新回答不会中断音频。" : "安装内置驱动后，实时提示会同时转送两路麦克风。").font(.caption).foregroundStyle(.secondary)
+                Text("文字显示不主动开启收音；已进入麦克风模式时，更新回答会保留音频。").font(.caption).foregroundStyle(.secondary)
+            }
+            Toggle("作为完整结果发送（final）", isOn: $finalText)
+            Text("完整结果用于结束当前识别片段；清屏请使用下方独立操作。")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Toggle("发送后自动清屏", isOn: $clearAfterSending)
+                if clearAfterSending { Stepper("\(clearAfterSeconds) 秒", value: $clearAfterSeconds, in: 1...600).frame(width: 180) }
             }
             HStack {
-                Button("发送到眼镜", systemImage: "paperplane") { bridge.showText(caption, translation: answer, prompt: usePrompt) }
+                Button("发送到眼镜", systemImage: "paperplane") { bridge.showText(caption, translation: answer, prompt: usePrompt, final: finalText, clearAfterMilliseconds: clearAfterSending ? clearAfterSeconds * 1000 : 0) }
                     .buttonStyle(.borderedProminent)
-                Button("重新打开显示") { bridge.showText(caption, translation: answer, prompt: usePrompt, reopen: true) }
+                Button("重新打开显示") { bridge.showText(caption, translation: answer, prompt: usePrompt, reopen: true, final: finalText, clearAfterMilliseconds: clearAfterSending ? clearAfterSeconds * 1000 : 0) }
             }.disabled(unavailable || caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bridge.selectedAddress.isEmpty)
+            Button("清空当前屏幕", systemImage: "eraser") { bridge.clearDisplay(prompt: usePrompt) }
+                .disabled(unavailable || (usePrompt ? bridge.activeSession != .prompts && bridge.activeSession != .assistantAudio : bridge.activeSession != .captions))
+            Text("清屏保留显示会话和收音；新内容会取消上一条内容的延时清屏。")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -318,23 +402,6 @@ private struct DesktopControlView: View {
         }
     }
 
-    private var teleprompterPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            TextField("稿件标题", text: $scriptTitle).textFieldStyle(.roundedBorder)
-            editor($scriptText, height: 220)
-            Picker("滚动速度", selection: $scriptSpeed) {
-                Text("60").tag(60)
-                Text("120").tag(120)
-            }.frame(width: 180)
-            HStack {
-                Button("发送并播放", systemImage: "play.fill") { bridge.startTeleprompter(title: scriptTitle, text: scriptText, speed: scriptSpeed) }
-                    .buttonStyle(.borderedProminent).disabled(scriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bridge.selectedAddress.isEmpty)
-                Button("暂停") { bridge.controlTeleprompter("pause") }.disabled(bridge.activeSession != .teleprompter)
-                Button("继续") { bridge.controlTeleprompter("resume") }.disabled(bridge.activeSession != .teleprompter)
-            }.disabled(unavailable)
-        }
-    }
-
     private var audioPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("直接使用眼镜麦克风").font(.headline)
@@ -371,8 +438,10 @@ private struct DesktopControlView: View {
             Text("全天智记音频（实验）").font(.headline)
             Text("按上方时长自动停止，可保存音频后回放。当前真机收到的是单声道，暂不替换两路虚拟麦克风；没有人声时可能不上传音频。")
                 .font(.callout).foregroundStyle(.secondary)
-            Toggle("保存单声道 WAV 用于回放", isOn: $saveLifeLogAudio)
+            Toggle("保存单声道 WAV 和原始音频分段", isOn: $saveLifeLogAudio)
                 .disabled(bridge.activeSession == .lifeLog)
+            Text("保留的分段可在“录音资料库”恢复；恢复不会自动执行历史语音中的任务。")
+                .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("开始全天智记采集") { bridge.startLifeLog(duration: audioDuration, record: saveLifeLogAudio) }
                     .disabled(unavailable || bridge.selectedAddress.isEmpty || bridge.activeSession == .lifeLog)
@@ -396,7 +465,7 @@ private struct DesktopControlView: View {
     private var microphoneSettings: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("眼镜麦克风").font(.headline)
-            Text("连接后默认开启两路麦克风，并进入实时提示页；问题与回答可同时显示。")
+            Text("连接后保持空闲。点击“进入麦克风模式”才开启双麦和实时提示，问题与回答可同时显示。")
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
                 Label(bridge.builtInMicrophonesReady ? "两路内置麦克风已就绪" : "尚未安装内置麦克风", systemImage: bridge.builtInMicrophonesReady ? "checkmark.circle" : "mic")
@@ -429,8 +498,8 @@ private struct DesktopControlView: View {
     private var connectionHelp: some View {
         DisclosureGroup("连接帮助与诊断") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("首次使用：让眼镜进入配对模式，点击“添加并配对眼镜”。应用会先清除目标眼镜在 Mac 上的旧配对，确认未配对、未连接后再建立新配对。")
-                Text("已有配对日常使用请选择“连接眼镜”。需要重新配对时，让眼镜进入配对模式，再点击“添加并配对眼镜”；若系统不支持自动清除，再按错误提示手动忽略。")
+                Text("首次使用：让眼镜进入配对模式，点击“添加并配对眼镜”。发现目标后建立系统配对，再独立确认记录保存，最后连接数据通道。")
+                Text("已有配对日常使用请选择“连接眼镜”。“添加并配对”会询问保留还是重新配对，不再自动删除已有记录。")
                 Button("打开系统蓝牙设置") { bridge.openBluetoothSettings() }
                 if let pid = bridge.serviceProcessID { Text("连接服务进程：\(pid)").textSelection(.enabled) }
                 if !bridge.apiAddress.isEmpty {
@@ -457,6 +526,8 @@ private final class DesktopApplicationDelegate: NSObject, NSApplicationDelegate 
         let menu = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "关于 OpenRayneo", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "退出 OpenRayneo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         menu.addItem(appItem)
@@ -479,6 +550,18 @@ private final class DesktopApplicationDelegate: NSObject, NSApplicationDelegate 
         self.window = window
         NSApp.activate(ignoringOtherApps: true)
         bridge.refreshDevices()
+        if OfficialCloudPolicy.enabled {
+            OfficialRecordingUploadModel.shared.startBackground(library: bridge.recordingLibrary)
+            OfficialCloudAudioModel.shared.start(library: bridge.recordingLibrary)
+        }
+        OfficialAccountModel.shared.prepareSignOut = { [weak bridge = bridge] in
+            guard let bridge else { return true }
+            await OfficialRecordingUploadModel.shared.suspendForSignOut()
+            await OfficialCloudAudioModel.shared.suspendForSignOut()
+            await bridge.feedback.suspendForTermination()
+            await OfficialAccountDataModel.shared.suspendForTermination()
+            return await bridge.shutdown()
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -490,7 +573,18 @@ private final class DesktopApplicationDelegate: NSObject, NSApplicationDelegate 
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         bridge.cancelPairing()
-        Task { let stopped = await bridge.shutdown(); sender.reply(toApplicationShouldTerminate: stopped) }
+        Task {
+            await OfficialRecordingUploadModel.shared.suspendForTermination()
+            await OfficialCloudAudioModel.shared.suspendForTermination()
+            await bridge.feedback.suspendForTermination()
+            await OfficialAccountDataModel.shared.suspendForTermination()
+            let stopped = await bridge.shutdown()
+            if !stopped {
+                OfficialRecordingUploadModel.shared.startBackground(library: bridge.recordingLibrary)
+                OfficialCloudAudioModel.shared.start(library: bridge.recordingLibrary)
+            }
+            sender.reply(toApplicationShouldTerminate: stopped)
+        }
         return .terminateLater
     }
 }

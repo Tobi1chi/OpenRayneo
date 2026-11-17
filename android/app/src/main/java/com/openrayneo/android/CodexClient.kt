@@ -48,7 +48,7 @@ internal class CodexClient(private val settings: AppSettings, private val change
                 override fun onOpen(webSocket: WebSocket, response: Response) { main.post {
                     if (session != generation) return@post
                     rpc("initialize", JSONObject().put("clientInfo", JSONObject().put("name", "openrayneo_android")
-                        .put("title", "OpenRayneo Android").put("version", "0.2.0"))) {
+                        .put("title", "OpenRayneo Android").put("version", BuildConfig.VERSION_NAME))) {
                         send(JSONObject().put("method", "initialized"))
                         openThread(config)
                     }

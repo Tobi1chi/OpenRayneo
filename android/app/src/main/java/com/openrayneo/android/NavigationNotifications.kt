@@ -33,7 +33,6 @@ internal object NavigationFeed {
     val entries = linkedMapOf<String, Entry>()
     val observers = mutableSetOf<() -> Unit>()
     private var preferences: android.content.SharedPreferences? = null
-    private var automaticSelection = true
     var listenerState = NotificationReadState()
         private set
 
@@ -76,12 +75,8 @@ internal object NavigationFeed {
         if (preferences != null) return
         preferences = context.getSharedPreferences("navigation_notification", Context.MODE_PRIVATE)
         selectedKey = preferences!!.getString("key", null)
-        enabled = preferences!!.getBoolean("enabled", false)
-        automaticSelection =
-            preferences!!.getBoolean(
-                "automaticSelection",
-                selectedKey == null && !preferences!!.contains("enabled"),
-            )
+        enabled = false
+        preferences!!.edit().putBoolean("enabled", false).remove("automaticSelection").apply()
     }
 
     fun connection(value: NotificationReadState) {
@@ -95,29 +90,12 @@ internal object NavigationFeed {
         lastSnapshotAt = System.currentTimeMillis()
         entries.clear()
         snapshot.forEach { entries[it.key] = it }
-        if (automaticSelection && selectedKey == null) {
-            val candidate =
-                snapshot.firstOrNull { it.channel == "ROUTE_CHANNEL_ID" && it.instruction != null }
-            if (candidate != null) {
-                follow(candidate.key)
-                return
-            }
-        }
         changed()
     }
 
     fun update(entry: Entry) {
         entries[entry.key] = entry
-        // The observed Xiaomi/Gaode maneuver notification uses this channel; the persistent
-        // foreground-service notification only says navigation is running and must not win.
-        if (
-            automaticSelection &&
-                selectedKey == null &&
-                entry.channel == "ROUTE_CHANNEL_ID" &&
-                entry.instruction != null
-        )
-            follow(entry.key)
-        else changed()
+        changed()
     }
 
     fun remove(key: String) {
@@ -128,23 +106,19 @@ internal object NavigationFeed {
         check(entries.containsKey(key)) { "该通知已消失，请在高德开始导航后刷新" }
         selectedKey = key
         enabled = true
-        automaticSelection = false
         preferences
             ?.edit()
             ?.putString("key", key)
             ?.putBoolean("enabled", true)
-            ?.putBoolean("automaticSelection", false)
             ?.apply()
         changed()
     }
 
     fun stop() {
         enabled = false
-        automaticSelection = false
         preferences
             ?.edit()
             ?.putBoolean("enabled", false)
-            ?.putBoolean("automaticSelection", false)
             ?.apply()
         changed()
     }

@@ -60,9 +60,9 @@ internal object ProtocolCodec {
         return frame(0x15, sequence, protobuf)
     }
 
-    fun display(protocol: Int, sequence: Int, type: Int, json: String): ByteArray {
+    fun display(protocol: Int, sequence: Int, type: Int, json: String, binary: ByteArray? = null): ByteArray {
         val bytes = json.toByteArray(Charsets.UTF_8)
-        return frame(protocol, sequence, byteArrayOf(8, 1, 16) + varint(type) + byteArrayOf(26) + varint(bytes.size) + bytes)
+        return frame(protocol, sequence, byteArrayOf(8, 1, 16) + varint(type) + byteArrayOf(26) + varint(bytes.size) + bytes + (binary?.let { byteArrayOf(34) + varint(it.size) + it } ?: byteArrayOf()))
     }
 
     data class Message(val type: Int, val json: String?, val audio: ByteArray?)

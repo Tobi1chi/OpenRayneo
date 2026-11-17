@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("method", choices=["GET", "POST", "DELETE"])
+    parser.add_argument("method", choices=["GET", "POST", "PATCH", "DELETE"])
     parser.add_argument("path", help="/health or a /v1/ endpoint")
     parser.add_argument("--body", metavar="FILE", help="JSON object file, or - for stdin")
     parser.add_argument("--timeout", type=float, default=90, help="Request timeout in seconds")

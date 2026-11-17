@@ -4,25 +4,37 @@
 <dict>
 	<key>CFBundleExecutable</key>
 	<string>openrayneo-bridge</string>
+	<key>CFBundleIconFile</key>
+	<string>OpenRayneo.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.openrayneo.bridge</string>
 	<key>CFBundleName</key>
-	<string>OpenRayneo Bridge</string>
-	<key>CFBundleIconFile</key>
-	<string>OpenRayneo.icns</string>
-	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
-	<key>CFBundleVersion</key>
-	<string>5</string>
+	<string>OpenRayneo</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>20</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<false/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>读取用户选择的 Apple Mail 账户及邮箱未读摘要，并同步到眼镜邮件卡片。</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>OpenRayneo Bridge connects to RayNeo iO glasses to send notifications and teleprompter text.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>OpenRayneo reads selected calendars and syncs events to your glasses.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>OpenRayneo syncs selected calendar events to your glasses.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>获取一次当前位置，查询天气并同步到眼镜的当前位置天气卡片。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>获取一次当前位置，查询天气并同步到眼镜的当前位置天气卡片。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>OpenRayneo transcribes audio from your glasses on this Mac and displays the text on the glasses.</string>
+	<key>OpenRayneoReleaseVersion</key>
+	<string>1.1.0-beta.1</string>
 </dict>
 </plist>

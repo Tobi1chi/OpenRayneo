@@ -41,7 +41,7 @@ internal fun OnboardingScreen(
             "欢迎使用 OpenRayneo。用几步完成设置，也可以稍后继续。",
             "用手机直接连接 RayNeo iO，导航与回答便能显示在眼前。",
             "路线由高德规划，OpenRayneo 读取通知，把方向、距离与路名带到眼镜。",
-            "手机可以独立调用模型；电脑在线时，也可以把任务交给 Codex。两项都可稍后配置。",
+            "手机通过本机 Agent 处理任务，并独立记录与总结；电脑在线时，也可以把任务交给 Codex。",
             "下面是当前准备情况。未完成的项目随时可以在设置中继续。",
         )
     Column(Modifier.fillMaxSize()) {
@@ -75,7 +75,7 @@ internal fun OnboardingScreen(
                         MaterialTheme.colorScheme.primary,
                     )
                     SetupRow(Icons.Outlined.NearMe, "抬眼看导航", "跟随手机高德的真实导航通知")
-                    SetupRow(Icons.Outlined.AutoAwesome, "随时问助手", "连接你自己的模型与电脑 Codex")
+                    SetupRow(Icons.Outlined.AutoAwesome, "随时问助手", "连接手机本机 Agent 与电脑 Codex")
                     SetupRow(Icons.Outlined.Tune, "由你掌控", "显示与收音可以随时暂停")
                 }
                 1 -> {
@@ -133,12 +133,12 @@ internal fun OnboardingScreen(
                 }
                 3 -> {
                     SetupOption(
-                        "手机模型",
-                        "填写服务地址、模型名与 API Key。使用你自己的模型服务。",
-                        model.config.optString("modelKey").isNotBlank(),
+                        "本机 Agent",
+                        "启用本机入口，在 DSH Go 插件中连接眼镜。",
+                        model.state.agentServer.enabled,
                         Icons.Outlined.Smartphone,
                     ) {
-                        configure("model")
+                        configure("agent-api")
                     }
                     SetupOption(
                         "电脑 Codex",
@@ -148,7 +148,7 @@ internal fun OnboardingScreen(
                     ) {
                         configure("computer")
                     }
-                    Note("“已保存”只表示填写了配置。真实连接结果会在助手页显示。手机语音输入目前使用手机的识别服务。")
+                    Note("本机 Agent 的语义策略与模型在 DSH Go 配置；记录总结模型可在语音与总结设置中单独配置。手机语音输入使用手机的识别服务。")
                 }
                 4 -> {
                     ContentCard {
@@ -160,9 +160,9 @@ internal fun OnboardingScreen(
                         )
                         CompletionRow("导航通知权限", model.notificationAllowed, "已开启", "稍后授权")
                         CompletionRow(
-                            "手机模型",
-                            model.config.optString("modelKey").isNotBlank(),
-                            "已保存配置",
+                            "本机 Agent",
+                            model.state.agentServer.enabled,
+                            "入口已启用",
                             "可选，稍后配置",
                         )
                         CompletionRow(
@@ -267,8 +267,8 @@ internal fun SettingsScreen(
     ) {
         SectionLabel("连接你的服务")
         SettingsRow(
-            "手机模型",
-            if (model.config.optString("modelKey").isBlank()) "尚未配置"
+            "记录总结模型",
+            if (!model.mobileModelConfigured) "尚未配置"
             else model.config.optString("modelName").ifBlank { "已保存配置" },
             Icons.Outlined.Smartphone,
         ) {
@@ -281,7 +281,13 @@ internal fun SettingsScreen(
         ) {
             open("computer")
         }
+        SettingsRow("DSH Go 与外部 Agent", "语音派任务、眼镜工具与本机API", Icons.Outlined.Hub) { open("agent-api") }
         SectionLabel("权限与设备")
+        SettingsRow("语音与总结", "眼镜ASR、人物分析与记录总结", Icons.Outlined.Mic) { open("voice-settings") }
+        SettingsRow("眼镜设置", "亮度、画面位置与唤醒", Icons.Outlined.Settings) { open("device-settings") }
+        SettingsRow("首页与内容", "小组件、待办、日程与天气", Icons.Outlined.Dashboard) { open("content") }
+        SettingsRow("提词稿库", "本地稿件、眼镜播放与控制", Icons.Outlined.Description) { open("teleprompter") }
+        SettingsRow("声音与人物", "本人登记、联系人与声音档案", Icons.Outlined.People) { open("voice-profiles") }
         SettingsRow(
             "附近设备",
             if (model.bluetoothAllowed) "已授权" else "连接眼镜时需要",
@@ -320,7 +326,7 @@ internal fun SettingsScreen(
         SectionLabel("了解 OpenRayneo")
         SettingsRow("再看一次使用引导", "连接眼镜、导航演示与助手配置", Icons.Outlined.Explore, replay)
         Note(
-            "OpenRayneo ${BuildConfig.VERSION_NAME}\n音频仅在手机内存中处理。系统语音输入尚未接入眼镜音频。",
+            "OpenRayneo ${BuildConfig.VERSION_NAME}\n记录音频在手机加密保存，转写与说话人分析完成后交付。系统语音输入使用手机识别服务。",
             Modifier.padding(vertical = 12.dp),
         )
     }
@@ -356,7 +362,8 @@ internal fun ConfigurationScreen(model: AppModel, mobile: Boolean, importConfig:
     val secret = model.formDrafts[secretKey].orEmpty()
     var showSecret by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
-    val ready = url.isNotBlank() && secret.isNotBlank() && (!mobile || name.isNotBlank())
+    val localModel = mobile && MobileModelEndpoint.isLocalAddress(url)
+    val ready = url.isNotBlank() && (secret.isNotBlank() || localModel) && (!mobile || name.isNotBlank())
     Column(
         Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -367,9 +374,9 @@ internal fun ConfigurationScreen(model: AppModel, mobile: Boolean, importConfig:
             Modifier.size(40.dp),
             tint = MaterialTheme.colorScheme.primary,
         )
-        Text(if (mobile) "模型服务配置" else "电脑连接配置", style = MaterialTheme.typography.headlineMedium)
+        Text(if (mobile) "记录总结模型配置" else "电脑连接配置", style = MaterialTheme.typography.headlineMedium)
         Note(
-            if (mobile) "支持兼容 Chat Completions 且支持工具调用的模型服务。请向服务商获取地址、模型名和 API Key。"
+            if (mobile) "供应用内记录总结使用，支持兼容 Chat Completions 的云端或手机本机服务。本机服务未启用鉴权时，API Key 可留空。"
             else "先在电脑运行 OpenRayneo 的 Codex 连接脚本，再导入它生成的配置。USB 模式还需要开启端口转发。"
         )
         if (!mobile) {
@@ -392,7 +399,7 @@ internal fun ConfigurationScreen(model: AppModel, mobile: Boolean, importConfig:
             placeholder = { Text(if (mobile) "https://服务商/v1" else "ws://127.0.0.1:4500") },
             singleLine = true,
             supportingText = {
-                Text(if (mobile) "使用 HTTPS 地址，不要把密钥放进地址中" else "USB：本机地址；无线连接：使用 WSS")
+                Text(if (mobile) "远端使用 HTTPS；手机本机可使用 HTTP，不要把密钥放进地址中" else "USB：本机地址；无线连接：使用 WSS")
             },
         )
         OutlinedTextField(
@@ -406,7 +413,7 @@ internal fun ConfigurationScreen(model: AppModel, mobile: Boolean, importConfig:
             secret,
             { model.formDrafts[secretKey] = it },
             Modifier.fillMaxWidth(),
-            label = { Text(if (mobile) "API Key" else "连接令牌") },
+            label = { Text(if (mobile && localModel) "API Key（本机服务可留空）" else if (mobile) "API Key" else "连接令牌") },
             keyboardOptions =
                 KeyboardOptions(
                     keyboardType = KeyboardType.Password,

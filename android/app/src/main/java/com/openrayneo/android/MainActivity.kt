@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.provider.ContactsContract
 import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,7 +18,19 @@ import org.json.JSONObject
 
 internal class MainActivity : ComponentActivity() {
     private val model: AppModel by viewModels()
+    private var exportRecord: String? = null
+    private val exportAudio = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri ->
+        val id = exportRecord; exportRecord = null
+        if (uri != null && id != null) model.exportRecording(id, uri)
+    }
     private var voiceSource = AnswerSource.MOBILE_AGENT
+    private val contact = registerForActivityResult(ActivityResultContracts.PickContact()) { uri ->
+        if (uri != null) model.attempt {
+            contentResolver.query(uri, arrayOf(ContactsContract.Contacts.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) model.selectedContact = SelectedContact(cursor.getString(0), uri.toString())
+            }
+        }
+    }
     private val permissions =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             model.refreshPermissions()
@@ -27,6 +40,9 @@ internal class MainActivity : ComponentActivity() {
                 else model.error = "连接眼镜需要附近设备权限。可以稍后在设置中授权，其他配置仍可使用。"
             }
         }
+    private val locationPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (PhoneLocation.allowed(this)) model.attempt { model.service().enableLocationWhileVisible() }
+    }
     private val importFile =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null)
@@ -60,6 +76,12 @@ internal class MainActivity : ComponentActivity() {
                 CompanionApp(
                     model,
                     UiActions(
+                        bluetoothPermission = {
+                            permissions.launch(arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT))
+                        },
+                        exportRecording = { id -> exportRecord = id; exportAudio.launch("OpenRayneo-meeting-$id.wav") },
+                        contact = { contact.launch(null) },
+                        locationPermission = { locationPermission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)) },
                         scan = {
                             if (model.bluetoothAllowed) model.scan()
                             else {
@@ -137,6 +159,10 @@ internal class MainActivity : ComponentActivity() {
 }
 
 internal data class UiActions(
+    val bluetoothPermission: () -> Unit,
+    val exportRecording: (String) -> Unit,
+    val contact: () -> Unit,
+    val locationPermission: () -> Unit,
     val scan: () -> Unit,
     val notificationAccess: () -> Unit,
     val notificationPermission: () -> Unit,

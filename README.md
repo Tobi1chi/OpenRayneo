@@ -1,320 +1,35 @@
 # OpenRayneo
 
-<img src="docs/assets/openrayneo-logo.png" alt="OpenRayneo OR logo" width="180" />
+<img src="docs/assets/openrayneo-logo.png" alt="OpenRayneo" width="120" />
 
-[English](README.md) · [简体中文](README.zh-CN.md)
+RayNeo iO 眼镜的 macOS / Android 伴侣。引出眼镜已有能力，完成采集、基础处理、记录与本机 Agent 接入。Mac 侧重工作流扩展和测试，手机侧重日常易用与全天记录。
 
-**OpenRayneo v1.0 — RayNeo iO companion apps for macOS and Android.**
+## 架构是项目主文档
 
-OpenRayneo connects directly to RayNeo iO glasses. The Mac app provides a desktop control panel and local HTTP API for text, notifications, audio and automation. The Android app follows Gaode navigation notifications and connects to a configurable mobile model or Codex running on a computer. Both are unofficial companion apps; no modified official app is required.
+- [架构看板](.arch/dashboard.html)：由 `.arch/graph.json` 生成的当前节点与契约。
+- [事实、当前实现与未解决问题](.arch/ground_truth.md)：开发和验收的当前基线。
+- [北极星](.arch/SEED.md)与[废弃方案](.arch/graveyard.md)：目标与取舍依据。
+- [开发约定](AGENTS.md)：维护架构、代码和精简文档的规则。
 
-Both apps reuse the glasses' existing page protocols. Android navigation uses a fixed text grid; arbitrary graphics and screen mirroring are outside the current scope. [Download v1.0](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.0) · [Android setup](android/README.md)
+在仓库根目录使用 `arch-grower`：
 
-## ASCII-style character video
+```sh
+uv run ~/.agents/skills/arch-grower/scripts/arch_cli.py focus --node speaker_channel_policy
+uv run ~/.agents/skills/arch-grower/scripts/arch_cli.py export-ui --out .arch/dashboard.html
+```
 
-Play a local video as a **26×7 character animation** on the glasses. Open the **Character Video** panel, choose a movie, and select **Full-width Grayscale**, **Blocks**, or experimental **Half Blocks**. Playback runs at **5 or 10 updates/s**, with optional inversion and contrast enhancement. The app decodes video locally, sends complete caption frames, and skips late frames to keep playback on time. Playback is silent.
+架构图通过 CLI 更新。节点决策、当前实现、已验证结果和未解问题分别维护；新的工作更新现有事实与节点。
 
-![Bad Apple!! rendered as a 26×7 full-width character animation](docs/assets/bad-apple-character-preview.gif)
+## 仅保留必要的操作与合同
 
-*Bad Apple!! — an 8-second local render preview at 10 fps, using the app's decoder and full-width brightness mapping with inversion enabled. This is a software preview, not footage through the glasses. The source PV artwork belongs to its respective creators.*
-
-The grayscale renderer averages small image regions and maps their brightness to **full-width Unicode characters**, using ideographic spaces for blank cells. Full-width grayscale display and alignment have been confirmed on the tested glasses. **Check Character Alignment** sends a ruler for checking your device. The current renderer stretches the image to fill the grid. Choose your own video; the app ships without video files.
-
-See [the character-video guide](docs/text-video.md) for rendering details and tested limits.
-
-## Agent skill
-
-The repository includes a distributable [OpenRayneo API skill](.agents/skills/openrayneo-api/SKILL.md) with connection guidance, endpoint examples, session rules, and a local request helper. It lets a local agent operate an existing Bridge; installing the skill does not install or pair the glasses.
-
-Agents that discover `.agents/skills/` can use it from this checkout. For use outside the repository, copy the complete `.agents/skills/openrayneo-api/` directory into your agent's skill directory (for Codex, `${CODEX_HOME:-$HOME/.codex}/skills/`). Other agents can read `SKILL.md` directly. Keep its `references/` and `scripts/` alongside it.
-
-Configure the running Bridge's current `OPENRAYNEO_API_URL` and `OPENRAYNEO_API_TOKEN` locally, then ask: **“Use $openrayneo-api to check the glasses connection and display my text.”** Never publish your token. The helper requires `uv` and uses only the Python standard library; it does not retry device writes automatically.
-
-## What works
-
-Verified on one RayNeo iO with an Apple Silicon Mac running macOS 15.6.1:
-
-| Capability | Result |
+| 需要做什么 | 入口 |
 | --- | --- |
-| Direct Bluetooth connection | BLE authentication and RFCOMM channel 26 connected |
-| Custom notifications | Chinese title and body visibly confirmed |
-| Chinese teleprompter text | Short script and 120-line, 16,319-byte script displayed |
-| Playback controls | Pause, resume, and stop visibly confirmed |
-| Real-time captions | Two-line Chinese text displayed and replaced without noticeable loading |
-| Text-grid display | 26×7 full-width character grid with blank-cell padding; 5–10 updates/s selected for daily use |
-| Real-time prompts | Chinese question and answer displayed; updates replaced the previous pair |
-| Todos | New item visibly confirmed alongside an existing item; test removal confirmed by readback |
-| Weather cards | Custom labels, negative temperatures, description, range, night icon, and ordered hourly entries visibly confirmed |
-| Glasses microphone ASR | Chinese speech recognized on the Mac and visibly updated in the glasses' prompt-page body |
-| Local WAV recording | Continuous stereo recording finalized and played back; two different channel signals confirmed |
-| Microphone channel mapping | Owner's experiment: channel 1 bone-conduction/wearer, channel 2 forward-facing/other speakers |
-| LifeLog wake diagnostics | Direct Mac enable/wake/audio flow; wearer and external speech triggered wake in controlled trials |
-| Larger writes | Segmented to the negotiated RFCOMM MTU |
-| Connection diagnostics | Inspect connection state and retry through HTTP |
-
-The glasses' firmware version was not recorded. Compatibility with other firmware versions, RayNeo models, Intel Macs, and older macOS releases has not been verified.
-
-## Requirements
-
-- RayNeo **iO** glasses, powered on and paired with your Mac.
-- macOS 13 or later (the package deployment target; tested on macOS 15.6.1).
-- Xcode Command Line Tools or Xcode with Swift 5.10 or later. Development was tested with Swift 6.1.2.
-- Bluetooth permission for the bridge or the application launching it, as requested by macOS.
-
-The Swift package uses Apple's system frameworks and has no external Swift package dependencies. App packaging needs `libopus` on the build machine (`brew install opus`) and bundles it for runtime use. ASR also needs Apple's on-device speech assets; see [ASR setup](docs/asr.md). The official Android APK and Bluetooth captures are not needed to build or run it.
-
-## macOS download
-
-Download the Apple Silicon (arm64) ZIP from [GitHub Releases](https://github.com/Tobi1chi/OpenRayneo/releases). Unzip it and move `OpenRayneoBridge.app` to Applications, then open its **Device & API** page. New devices can use **Add and Pair Glasses**; already paired devices can connect directly. The download does not require Xcode.
-
-The v1.0 Mac package requires macOS 15+ on Apple Silicon and bundles Opus and the two-channel microphone driver installer. It is ad-hoc signed and not Apple-notarized; first launch may require per-app approval in macOS settings. Device testing used macOS 15.6.1; no Intel binary is included. ASR needs Apple's local language assets and Speech Recognition permission. The ZIP contains no videos, recordings or credentials.
-
-## Android download
-
-The [v1.0 release](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.0) also includes `OpenRayneo-1.0.0-android.apk` for Android 13+. It provides direct glasses connection, Gaode notification navigation, mobile-model configuration and desktop Codex access. Follow the first-run guide and grant nearby-device and notification-listener access when requested. See [Android setup](android/README.md).
-
-This is a non-debuggable release build using the existing development signing certificate, by maintainer choice, so existing development installations can upgrade in place. Its versionCode is 19, supporting upgrades from v0.1 and earlier development builds. Android glasses ASR remains paused; long-running background and cross-network use still need validation.
-
-For source builds and headless use, follow the steps below. To create a release ZIP from source, see [release packaging](docs/releases.md).
-
-## Quick start
-
-### 1. Build
-
-Install Apple's development tools if needed:
-
-```sh
-xcode-select --install
-```
-
-Then clone and build:
-
-```sh
-git clone https://github.com/Tobi1chi/OpenRayneo.git
-cd OpenRayneo
-sh scripts/build-app.sh
-```
-
-This creates `OpenRayneoBridge.app`, a native macOS control panel with the required privacy descriptions. The build uses an available development certificate to preserve macOS permissions across rebuilds, falling back to ad-hoc signing when none is available. It is not notarized. See [signing and persistent permissions](docs/desktop-app.md#persistent-macos-permissions).
-
-### 2. Pair from the command line
-
-Use a known classic Bluetooth address; the glasses do not need to appear in the system's Nearby Devices search. Stop the Bridge and turn off phone Bluetooth first. The commands below remove only the target Mac bond before pairing. For a new device, enter glasses pairing mode; during recovery of the known glasses, preserve their current state. Ordinary reconnection does not require bond removal.
-
-```sh
-export RAYNEO_ADDRESS='AA-BB-CC-DD-EE-FF' # Replace with the glasses' actual address
-./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --unpair "$RAYNEO_ADDRESS"
-./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pairing-status "$RAYNEO_ADDRESS"
-./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pair "$RAYNEO_ADDRESS"
-./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --pairing-status "$RAYNEO_ADDRESS"
-```
-
-Require pairing result `0` and an independent `isPaired: true`, then let the pairing command exit before starting the Bridge. The bundled command above is still under validation. The complete connection and visible notification confirmed on 2026-09-29 used the [separate Swift helper and recovery procedure](docs/protocol.md#verified-recovery-on-2026-09-29), which includes the runnable reference implementation.
-
-### 3. Open the control panel
-
-Control names in this guide are English translations of the app’s Chinese labels.
-
-Double-click `OpenRayneoBridge.app`, or run:
-
-```sh
-open ./OpenRayneoBridge.app
-```
-
-The **Device & API** page connects already paired glasses through **Connect and Enable API**. Copy the address, token, or authenticated query command from this page. GUI recovery after replacing only the Mac bond has been verified, but initial pairing can still fail. See the [manual acceptance procedure](docs/desktop-app.md#manual-first-pair-acceptance).
-
-The other panels send the minimal navigation demo, captions/prompts, notifications, and teleprompter scripts, or start local ASR/WAV recording. Disconnecting or quitting stops the app-owned service. The navigation demo uses manual direction/distance values; it is not GPS navigation. See [desktop controls](docs/desktop-app.md).
-
-The experimental **Character Video** panel converts local movies into brightness-matched full-width characters, block, or half-block animations at 5–10 updates/s. See [the text-video guide](docs/text-video.md) for hardware validation limits.
-
-### 4. Headless mode and API examples
-
-After completing command-line pairing, keep the glasses awake and phone Bluetooth off, then start the API as a separate process.
-
-In the first terminal, run:
-
-```sh
-export OPENRAYNEO_API_TOKEN="$(openssl rand -hex 24)"
-./OpenRayneoBridge.app/Contents/MacOS/openrayneo-bridge --headless
-```
-
-Allow Bluetooth access if macOS asks. Keep this terminal running; press `Ctrl+C` to stop the bridge.
-
-By default, the API listens on `http://127.0.0.1:8765`. Startup output includes the API token. In a second terminal, set that same token for the examples below:
-
-```sh
-export OPENRAYNEO_API_TOKEN='paste-the-token-from-the-first-terminal'
-```
-
-If several iO devices are paired, set `RAYNEO_ADDRESS` before starting the bridge to select the intended device.
-
-Connect and send a notification:
-
-```sh
-curl -X POST http://127.0.0.1:8765/v1/device/connect \
-  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
-
-curl -X POST http://127.0.0.1:8765/v1/notifications \
-  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"Hello from Mac","body":"Your local app can send text here."}'
-```
-
-Notification and teleprompter requests also connect on demand, so the explicit connect request is optional.
-
-## API
-
-All endpoints except `GET /health` require `Authorization: Bearer <token>`.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/health` | Process health and BLE/RFCOMM connection flags |
-| `GET` | `/v1/device` | BLE phase, scan count, last BLE error, and connection state |
-| `POST` | `/v1/device/connect` | Connect without sending display content |
-| `POST` | `/v1/notifications` | Send a notification; requires `title` and `body` strings |
-| `POST` | `/v1/teleprompter` | Transfer and start a script; requires a nonempty `text` string |
-| `POST` | `/v1/teleprompter/pause` | Pause the active script |
-| `POST` | `/v1/teleprompter/resume` | Resume the active script |
-| `POST` | `/v1/teleprompter/stop` | Stop the active script |
-| `POST` | `/v1/captions/start`, `/text`, `/stop` | Start, update, or exit live captions |
-| `POST` | `/v1/prompts/start`, `/text`, `/stop` | Start, update, or exit real-time prompts |
-| `GET` | `/v1/todos` | Read the complete task snapshot |
-| `POST` | `/v1/todos` | Add a todo while preserving existing records; requires `title` |
-| `DELETE` | `/v1/todos/{id}` | Remove a todo created by this bridge process |
-| `GET` | `/v1/display/events` | Recent display replies and discarded audio packet count |
-| `GET` | `/v1/dashboard` | Read dashboard configuration, including configured weather city IDs |
-| `POST` | `/v1/weather/current` | Set current-location weather; requires `location`, `temp`, and `icon` |
-| `POST` | `/v1/weather/cities` | Set city weather data from a nonempty `cities` array |
-| `POST` | `/v1/asr/authorize` | Request macOS speech recognition permission |
-| `POST` | `/v1/asr/start`, `/stop` | Start or stop glasses-microphone ASR with local recognition |
-| `GET` | `/v1/asr` | Audio statistics, current transcript, display writes, and errors |
-| `POST` | `/v1/recording/start`, `/stop` | Start or stop one continuous stereo WAV recording |
-| `GET` | `/v1/recording` | Recording path, duration, finalization state, and audio statistics |
-| `GET` | `/v1/virtual-mic/devices` | List installed virtual audio devices |
-| `POST` | `/v1/virtual-mic/start`, `/stop` | Forward both channels to the built-in microphone pair |
-| `GET` | `/v1/virtual-mic` | Forwarding status, selected device/channel, and buffer statistics |
-| `POST` | `/v1/lifelog/observe`, `/switch`, `/record`, `/stop` | Experimental LifeLog observation, enablement, audio request, and cleanup |
-| `GET` | `/v1/lifelog` | Bounded wake/exit events and audio/VPU/VAD counters |
-
-### Teleprompter
-
-```sh
-curl -X POST http://127.0.0.1:8765/v1/teleprompter \
-  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"Demo","text":"Hello from OpenRayneo.\nYour script appears on the glasses.","speed":60}'
-```
-
-`title` defaults to `OpenRayneo`; `speed` defaults to `120`. Speed values `60` and `120` were used during testing; the firmware's complete range and units have not been established. The current layout uses a three-second countdown.
-
-A successful response has the form:
-
-```json
-{"ok":true,"sent":"teleprompter","did":"<script-id>"}
-```
-
-Control the script created by the current bridge process:
-
-```sh
-curl -X POST http://127.0.0.1:8765/v1/teleprompter/pause \
-  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
-curl -X POST http://127.0.0.1:8765/v1/teleprompter/resume \
-  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
-curl -X POST http://127.0.0.1:8765/v1/teleprompter/stop \
-  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
-```
-
-### Captions, prompts, and todos
-
-```sh
-curl -X POST http://127.0.0.1:8765/v1/captions/start \
-  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
-curl -X POST http://127.0.0.1:8765/v1/captions/text \
-  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"Live captions\nUpdated by your local app."}'
-curl -X POST http://127.0.0.1:8765/v1/captions/stop \
-  -H "Authorization: Bearer $OPENRAYNEO_API_TOKEN"
-```
-
-Check `accepted: true` in the start response before sending text. Replace `captions` with `prompts` to use the prompt page; its text body can include `translation` for an answer and `final: true`. Stop each session when finished. Prompt startup forwards both built-in virtual microphones by default and requires the installed driver; `duration` defaults to 3600 seconds. Use `microphone_enabled:false` for text only. Answer updates reuse the audio session; prompt stop closes the page and both outputs.
-
-Todo creation accepts `{"title":"Prepare notes","important":false}` and returns `eventID` and `readBack`. It uses a full-list read/merge/sync, so keep the official phone app disconnected during writes. Open the glasses' todo menu manually. Deletion is limited to IDs created by the running bridge; a restart loses this ownership state. See [display protocol and API details](docs/display-protocol.md) for tested behavior and limitations.
-
-Experimental weather endpoints accept caller-supplied values; they do not fetch forecasts. Read `/v1/dashboard` for existing city IDs before updating city cards. Weather replies expose `acknowledged` and the raw device reply; confirm visible rendering on the glasses. See [weather formats and examples](docs/schedule-weather-protocol.md) for the current-location and city-card payloads. Test values remain until another update replaces them.
-
-### Text grid
-
-For a text-based dashboard, the caption page supports a tested 26×7 grid using full-width characters and `U+3000` padding (`font_size: 1`, `content_width: 100`, `max_lines: 7`). A 20×6 grid also works at `font_size: 2`. Target 5–10 whole-panel updates/s for daily use; a 30 Hz constant-speed animation test also passed visually, but the physical refresh limit is unmeasured. See [text layout measurements, update rates, and frame construction](docs/text-layout.md). The page takes plain text frames; ANSI terminal control and arbitrary graphics are outside its scope.
-
-### Glasses microphone ASR
-
-The experimental ASR path decodes glasses audio on the Mac, uses Apple's on-device speech recognizer, and displays the result on the real-time prompt page. It does not use the Mac microphone or upload audio. Install `opus`, launch the built app with `open` for correct macOS permission attribution, then authorize and start through the ASR endpoints. See [ASR setup and API](docs/asr.md) for exact commands, duration limits, and diagnostics.
-
-### Local WAV recording
-
-Use `/v1/recording/start` to record without ASR, or add `"record": true` to an ASR start request. Audio is appended to one 48 kHz, 16-bit stereo WAV, with a header checkpoint every second and finalization on stop. Files default to `~/Music/OpenRayneo/Recordings/`. See [recording setup, size limits, and channel findings](docs/recording.md).
-
-### Two built-in virtual microphones for Codex
-
-The app bundles its own audio driver installer and Opus decoder. In **设备与 API**, install the built-in driver once with macOS administrator authentication; connection then automatically starts simultaneous forwarding to **OpenRayneo Microphone Channel 1** (wearer) and **Channel 2** (forward-facing). In Codex select Channel 1; another app can read Channel 2 at the same time. BlackHole and Background Music are not required. If the inputs do not appear after installation, restart the Mac and refresh devices.
-
-Forwarding does not save WAV files, run ASR, or change default audio devices. It shares the prompt page with answer updates and remains exclusive with ASR/recording. Desktop connection enables both channels by default; driver installation and duration settings live in **设备与 API**, with no separate microphone page. See [built-in driver setup, API, and validation limits](docs/virtual-microphone.md).
-
-### Response semantics
-
-LifeLog diagnostics are separate from Proactive AI ASR/recording. They count audio without saving or transcribing it, and reserve the display/audio controls during observation. See [LifeLog protocol and test results](docs/lifelog-protocol.md) for the experimental API and wake behavior.
-
-- `200`: a read succeeded, RFCOMM opened for `/v1/device/connect`, or a display startup reply arrived (inspect `accepted`). In `/health`, `ok: true` means the server is running; inspect `bleReady` and `rfcommConnected` separately.
-- `202`: the display/control frames were written. Script startup also waits for a file-transfer acknowledgment. Confirm visible rendering or playback state on the glasses.
-- Errors use `{"error":"..."}`. Common statuses include `400` for invalid input, `401` for a missing/wrong token, `409` when no script is active, `413` for oversized data, and `503`/`504` for connection or transfer failures.
-
-## Configuration
-
-Set these environment variables before launching the bridge:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `OPENRAYNEO_API_TOKEN` | Generated at startup | Bearer token; printed in startup output |
-| `OPENRAYNEO_PORT` | `8765` | Local HTTP port |
-| `RAYNEO_ADDRESS` | Auto-select one paired iO | Classic Bluetooth address when selection is ambiguous |
-| `OPENRAYNEO_RECORDINGS_DIR` | `~/Music/OpenRayneo/Recordings/` | Directory for explicitly requested WAV recordings |
-| `OPENRAYNEO_OPUS_LIBRARY` | Standard Homebrew paths | Optional explicit libopus dylib path for ASR |
-| `OPENRAYNEO_BLE_TRACE` | Off | Set to `1` to log nearby advertisement names, services, connectability, and RSSI |
-
-The server binds to `127.0.0.1` only and is intended for local integrations. Treat the startup token as a credential, and redact it before sharing logs. BLE tracing can include names of nearby devices.
-
-## Troubleshooting
-
-**The bridge cannot select the glasses:** confirm a saved Mac bond using the command-line pairing instructions above. If multiple iO devices are paired, set `RAYNEO_ADDRESS` to the desired device's address.
-
-**BLE discovery times out:** keep the glasses awake and nearby, check their pairing/discovery mode, and temporarily disable the phone's system Bluetooth. Disconnecting only the phone app was not sufficient during testing. Check macOS Bluetooth permissions as well.
-
-**A connection attempt fails:** inspect `GET /v1/device`, then retry `POST /v1/device/connect`. A BLE attempt has a 15-second timeout and cleans up its scan/pending connection. RFCOMM opening has a further 12-second wait.
-
-**RFCOMM times out after switching from the phone:** if macOS logs report `BT_ERROR_INVALID_LINK_KEY`, stop the Bridge and follow the [verified separate-helper recovery procedure](docs/protocol.md#verified-recovery-on-2026-09-29). Forgetting the Mac bond, pairing with the standalone helper, exiting it, and starting the Bridge restored the data channel without unbinding the official phone account. Re-entering glasses pairing mode restored BLE advertising in one trial, but the existing Mac bond still needs its own verification. The GUI reproduces the same recovery; first-attempt pairing remains unreliable.
-
-**A control request returns `409`:** start a new script through this bridge process. Active script state is not recovered after a restart or after `stop`. Caption/prompt text requires an accepted session; stop that session before retrying a failed start.
-
-## Current limits
-
-- This is an early prototype with a narrow hardware test base, not an official RayNeo SDK.
-- The API manages one selected pair of glasses and one active script per process. It does not synchronize the phone app's script library.
-- The tested long script fits in one application-level file chunk. Repeated file-chunk requests and larger scripts still need device testing.
-- A protocol payload cannot exceed 65,531 bytes; framing overhead reduces the space available for text. Oversized frames return `413`. This is separate from RFCOMM MTU segmentation.
-- Account-bound ECDH authentication is not implemented. Firmware requesting it will receive an explicit unsupported-authentication error.
-
-## Development
-
-```sh
-swift build
-sh scripts/build-app.sh
-```
-
-The GitHub Actions workflow builds the app on macOS. It cannot validate Bluetooth behavior without real hardware. See [protocol notes](docs/protocol.md) for the transport format, authentication flow, and device-validation boundaries.
-
-Issues and pull requests are welcome. For connection reports, include the glasses model/firmware, macOS version, and a redacted `/v1/device` response. Keep tokens, device addresses, personal notification text, official APKs, and raw captures out of public reports.
-
-## License and affiliation
-
-Licensed under the [Apache License 2.0](LICENSE). OpenRayneo is an independent project, not affiliated with or endorsed by RayNeo. RayNeo names and trademarks belong to their respective owners. No official APK, firmware image, or captured user data is distributed in this repository.
+| 安装、构建、连接、DSH、声音调试与故障恢复 | [运行指南](docs/runbook.md) |
+| 设备帧、认证、控制生命周期与逆向证据索引 | [核心协议](docs/protocol.md) |
+| 手机记录与 Mac 副本、游标、派生写回 | [同步契约](docs/record-sync-contract.md) |
+| Mac 本机 HTTP API、参数与请求脚本 | [API 技能](.agents/skills/openrayneo-api/SKILL.md) |
+| 手机本机 DSH Agent 插件 | [插件说明](integrations/dsh-go/README.md) |
+
+当前候选包和质量问题见[实现快照](.arch/ground_truth.md#当前实现与未解决问题)。官方账号／官方云服务分支在当前 Beta 停用；眼镜固件及官方已具备的功能构成设备能力边界。
+
+[Apache License 2.0](LICENSE)。本项目独立于 RayNeo；官方 APK、固件、用户录音与凭据不随源码分发。

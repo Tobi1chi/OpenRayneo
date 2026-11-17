@@ -78,12 +78,24 @@ final class OpusDecoder {
     }
 }
 
-/// Finite LifeLog experiments inspect audio and optionally save a mono WAV for playback.
+/// Receives LifeLog rounds, feeds live ASR, and optionally preserves local audio.
 final class LifeLogAudioProbe {
     private let queue = DispatchQueue(label: "openrayneo.lifelog-audio-probe")
     private let pendingLock = NSLock()
     private var pending = 0
-    private let decoder: OpusDecoder
+    private var decoder: OpusDecoder
+    private let assistantFeed: AssistantAudioFeed?
+    private var assistantRound: String?
+    private var wireTaskID: String?
+    private let captureStore: LifeLogCaptureStore?
+    private var captureError: String?
+    private var ignoredTaskPackets = 0
+    private var fallbackTaskPackets = 0
+    private var unownedPackets = 0
+    private var formatWarnings = 0
+    private var roundStartedAt = Date.distantPast
+    private var receivedMessages = 0
+    private var assistantPCM = Data()
     private let recording: WAVRecording?
     private var recordingError: String?
     private var packets = 0
@@ -92,32 +104,87 @@ final class LifeLogAudioProbe {
     private var errors = 0
     private var levels: [Float] = [0]
 
-    init(record: Bool = false) throws {
-        decoder = try OpusDecoder(sampleRate: 48_000, channels: 1)
-        recording = record ? try WAVRecording(sampleRate: 48_000, channels: 1) : nil
+    init(record: Bool = false, assistantFeed: AssistantAudioFeed? = nil, captureStore: LifeLogCaptureStore? = nil) throws {
+        self.assistantFeed = assistantFeed
+        self.captureStore = captureStore
+        let rate = assistantFeed == nil ? 48_000 : 16_000
+        decoder = try OpusDecoder(sampleRate: rate, channels: 1)
+        recording = record ? try WAVRecording(sampleRate: rate, channels: 1) : nil
+    }
+
+    func beginAssistantRound(_ id: String, wireTaskID: String? = nil, boundary: String = "capture_start") {
+        let started = Date()
+        queue.async {
+            self.endAssistantRoundOnQueue(reason: "superseded")
+            do {
+                self.decoder = try OpusDecoder(sampleRate: self.assistantFeed == nil ? 48_000 : 16_000, channels: 1)
+            } catch { self.captureError = error.localizedDescription; self.assistantFeed?.append("gap", round: id); return }
+            self.assistantRound = id
+            self.wireTaskID = wireTaskID ?? id
+            self.roundStartedAt = started
+            do { try self.captureStore?.beginRound(taskID: wireTaskID ?? id) }
+            catch { self.captureError = error.localizedDescription }
+            self.assistantFeed?.append("begin", round: id, metadata: ["sourceTaskID": wireTaskID ?? id, "boundary": boundary])
+        }
+    }
+
+    func endAssistantRound(reason: String = "glasses_exit") { queue.async { self.endAssistantRoundOnQueue(reason: reason) } }
+
+    private func endAssistantRoundOnQueue(reason: String) {
+        guard let round = assistantRound else { return }
+        if !assistantPCM.isEmpty { assistantFeed?.append("pcm", round: round, pcm: assistantPCM); assistantPCM = Data() }
+        assistantFeed?.append("end", round: round, metadata: ["boundary": reason]); assistantRound = nil
+        wireTaskID = nil
+        do { try captureStore?.endRound(reason: reason) }
+        catch { captureError = error.localizedDescription }
     }
 
     func consume(_ message: RemoteMessage) {
         guard let audio = message.audioData, !audio.isEmpty else { return }
         pendingLock.lock()
-        guard pending < 64 else { pendingLock.unlock(); return }
+        guard pending < 64 else {
+            pendingLock.unlock(); assistantFeed?.append("gap", round: "unknown"); return
+        }
         pending += 1
         pendingLock.unlock()
         queue.async {
             defer { self.pendingLock.lock(); self.pending -= 1; self.pendingLock.unlock() }
-            let frames: [Data]
-            if let count = message.json?["frameCount"] as? Int {
-                frames = (0..<max(0, min(31, count, audio.count / 240))).map {
-                    audio.subdata(in: ($0 * 240)..<(($0 + 1) * 240))
-                }
-            } else { frames = [audio] }
+            guard let round = self.assistantRound, let wireTaskID = self.wireTaskID,
+                  message.receivedAt >= self.roundStartedAt else {
+                self.unownedPackets += 1; return
+            }
+            let metadata = message.json ?? [:]
+            let suppliedTask = (metadata["taskId"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !suppliedTask.isEmpty, suppliedTask != wireTaskID {
+                self.ignoredTaskPackets += 1; return
+            }
+            let fallback = suppliedTask.isEmpty
+            self.receivedMessages += 1
+            if fallback { self.fallbackTaskPackets += 1 }
+            do { try self.captureStore?.append(message: message, taskID: wireTaskID, attribution: fallback ? "active_round_fallback" : "explicit_task") }
+            catch { self.captureError = error.localizedDescription }
+            let frames = LifeLogAudioPayload.frames(audio: audio, metadata: metadata)
+            let warnings = LifeLogAudioPayload.warnings(audio: audio, metadata: metadata)
+            if !warnings.isEmpty {
+                self.formatWarnings += 1
+                self.assistantFeed?.append("gap", round: round)
+            }
             for frame in frames {
                 let channels = self.decoder.encodedChannels(frame)
                 self.channelCounts[String(channels), default: 0] += 1
                 do {
                     let pcm = try self.decoder.decode(frame)
                     self.packets += 1
-                    self.decodedSeconds += Double(pcm.frameLength) / 48_000
+                    self.decodedSeconds += Double(pcm.frameLength) / pcm.format.sampleRate
+                    if let feed = self.assistantFeed, let round = self.assistantRound {
+                        for index in 0..<Int(pcm.frameLength) {
+                            var value = Int16(max(-32768, min(32767, Int(pcm.floatChannelData![0][index] * 32768)))).littleEndian
+                            withUnsafeBytes(of: &value) { self.assistantPCM.append(contentsOf: $0) }
+                        }
+                        if self.assistantPCM.count >= 6400 {
+                            feed.append("pcm", round: round, pcm: self.assistantPCM); self.assistantPCM = Data()
+                        }
+                    }
                     self.levels = (0..<Int(pcm.format.channelCount)).map { channel in
                         var squares: Float = 0
                         for index in 0..<Int(pcm.frameLength) {
@@ -130,25 +197,43 @@ final class LifeLogAudioProbe {
                         do { try self.recording?.append(pcm) }
                         catch { self.recordingError = (error as? BridgeError)?.message ?? error.localizedDescription }
                     }
-                } catch { self.errors += 1 }
+                } catch {
+                    self.errors += 1
+                    self.assistantFeed?.append("gap", round: self.assistantRound ?? "unknown")
+                }
             }
         }
     }
 
     func finish() throws {
-        try queue.sync { try recording?.finish() }
+        try queue.sync {
+            endAssistantRoundOnQueue(reason: "observation_stopped")
+            try captureStore?.finish()
+            try recording?.finish()
+        }
     }
 
     var status: [String: Any] {
-        queue.sync { ["decodedPackets": packets, "decodedSeconds": decodedSeconds,
+        queue.sync { ["decodedPackets": packets, "decodedSeconds": decodedSeconds, "audioPackets": receivedMessages,
                       "encodedChannelCounts": channelCounts, "decodeErrors": errors,
                       "audioRMS": levels, "recording": recording?.status as Any? ?? NSNull(),
+                      "ignoredTaskPackets": ignoredTaskPackets, "fallbackTaskPackets": fallbackTaskPackets,
+                      "unownedPackets": unownedPackets, "formatWarnings": formatWarnings,
+                      "preservingAudio": captureStore != nil, "captureError": captureError as Any? ?? NSNull(),
+                      "error": (captureError ?? recordingError) as Any? ?? NSNull(),
                       "recordingError": recordingError as Any? ?? NSNull()] }
     }
 }
 
 /// Owns one glasses audio session for recognition, recording, or microphone output.
 final class SpeechController {
+    private let displayQueue = DispatchQueue(label: "openrayneo.audio-display-control")
+    private var stopCompletion: DispatchGroup?
+    private var stoppingDisplay = false
+    private var stopWasAssistant = false
+    private var stopWasShared = false
+    private var displayUpdatePending = false
+    private var desiredDisplayText = ""
     private let transport: RFCOMMTransport
     private let displays: DisplayController
     private let queue = DispatchQueue(label: "openrayneo.speech")
@@ -156,6 +241,10 @@ final class SpeechController {
     private var pendingPackets = 0
     private var overflowPackets = 0
     private var running = false
+    private var remotePaused = false
+    private var transportSuspended = false
+    private var audioAcceptedAfter = Date.distantPast
+    private var remoteControlReason: Int?
     private var sid: String?
     private var decoder: OpusDecoder?
     private var stereoDecoder: OpusDecoder?
@@ -183,25 +272,173 @@ final class SpeechController {
     private var displayedText = ""
     private var error: String?
     private var locale = "zh-CN"
+    private var assistantFeed: AssistantAudioFeed?
+    private var assistantRoundID: String?
+    private var assistantCapturing = false
+    private var assistantChannel = 0
+    private var assistantStereo = false
+    private var assistantSampleRate = 16000
+    private var assistantPCM = Data()
+    private var assistantStopping = false
+    private var assistantSequences: [Int] = []
 
     init(transport: RFCOMMTransport, displays: DisplayController) {
         self.transport = transport
         self.displays = displays
+        displays.setSpeechStateHandler { [weak self] business, sid, phase, reason in
+            self?.queue.async { [weak self] in self?.remoteSessionChanged(business: business, sid: sid, phase: phase, reason: reason) }
+        }
+        displays.setSpeechSettingsHandler { [weak self] sid, settings in
+            self?.queue.async { [weak self] in
+                guard let self, self.running, !self.stoppingDisplay, self.sid == sid,
+                      let language = settings["source_language"] as? String, language != self.locale else { return }
+                do { try self.changeHostLanguage(language, reason: "settings_readback") }
+                catch { self.error = error.localizedDescription; self.stop() }
+            }
+        }
+        displays.setSpeechRecoveryHandler { [weak self] sid, completion in
+            guard let self else { completion(false); return }
+            self.queue.async { [weak self] in
+                guard let self, self.running, !self.stoppingDisplay, self.sid == sid, self.transportSuspended else {
+                    completion(false); return
+                }
+                do {
+                    try self.prepareAudioAfterReconnect()
+                    completion(true)
+                } catch {
+                    self.error = error.localizedDescription
+                    completion(false)
+                }
+            }
+        }
+    }
+
+    private func prepareAudioAfterReconnect() throws {
+        if decoder != nil { decoder = try OpusDecoder() }
+        if stereoDecoder != nil {
+            stereoDecoder = try OpusDecoder(sampleRate: assistantCapturing ? assistantSampleRate : 48_000, channels: 2)
+        }
+        lastAudioSequence = nil
+        assistantSequences = []
+    }
+
+    private func remoteSessionChanged(business: UInt8, sid: String, phase: String, reason: Int) {
+        guard business == 0x17, running, self.sid == sid else { return }
+        remoteControlReason = reason
+        if phase == "disconnected" {
+            transportSuspended = true
+            remotePaused = true
+            if assistantCapturing { endAssistantRound(reason: "transport_disconnected") }
+            taskID = UUID()
+            request?.endAudio(); task?.cancel(); request = nil; task = nil
+            desiredDisplayText = ""; transcript = ""; level = 0
+        } else if phase == "paused", transportSuspended {
+            do { try prepareAudioAfterReconnect(); transportSuspended = false }
+            catch { self.error = error.localizedDescription }
+        } else if phase == "paused", !remotePaused {
+            remotePaused = true
+            if assistantCapturing { endAssistantRound(reason: "remote_pause") }
+            taskID = UUID()
+            request?.endAudio(); task?.cancel(); request = nil; task = nil
+        } else if phase == "active", remotePaused {
+            let boundary = transportSuspended ? "transport_reconnected" : "remote_resume"
+            transportSuspended = false
+            remotePaused = false
+            audioAcceptedAfter = Date()
+            lastAudioAt = Date()
+            if assistantCapturing { beginAssistantRound(reason: boundary) }
+            if recognitionEnabled { beginRecognition() }
+        } else if phase == "closed" { stop() }
     }
 
     func route(method: String, path: String, body: [String: Any]) throws -> (Int, [String: Any])? {
+        if method == "POST", path == "/v1/prompts/settings" {
+            return try queue.sync {
+                guard running else { return nil }
+                guard !stoppingDisplay, !assistantStopping, let sid else {
+                    throw BridgeError(status: 409, message: "收音正在结束，请等待后再更新语言。")
+                }
+                let language = body["language"] as? String ?? locale
+                // Preflight Apple availability before changing either endpoint.
+                let prepared = language != locale ? try prepareRecognizer(language) : nil
+                var update = body
+                if let requested = body["sid"] as? String, requested != sid {
+                    throw BridgeError(status: 409, message: "实时提示会话已变化。")
+                }
+                update["sid"] = sid
+                let response = try displays.route(method: method, path: path, body: update, forSpeech: true)
+                if language != locale { try changeHostLanguage(language, reason: "language_change", prepared: prepared) }
+                return response
+            }
+        }
+        if method == "POST", ["/v1/assistant-audio/stop", "/v1/prompts/stop", "/v1/asr/stop", "/v1/recording/stop", "/v1/virtual-mic/stop"].contains(path) {
+            let action: (Bool, DispatchGroup?) = queue.sync {
+                if path == "/v1/assistant-audio/stop", !assistantCapturing && !(stoppingDisplay && stopWasAssistant) { return (true, nil) }
+                if path == "/v1/prompts/stop", !(running && (!virtualMicrophones.isEmpty || assistantCapturing)) && !(stoppingDisplay && stopWasShared) { return (false, nil) }
+                stop(); return (true, stopCompletion)
+            }
+            guard action.0 else { return nil }
+            if let group = action.1, group.wait(timeout: .now() + 12) == .timedOut {
+                throw BridgeError(status: 504, message: "Audio has stopped; the glasses page is still closing")
+            }
+            return (200, queue.sync { status() })
+        }
+        if method == "POST", ["/v1/prompts/text", "/v1/prompts/clear"].contains(path) {
+            let expected: String? = try queue.sync {
+                guard running, !virtualMicrophones.isEmpty || assistantCapturing else { return nil }
+                guard !assistantStopping, !stoppingDisplay, let sid else {
+                    throw BridgeError(status: 409, message: "Audio display is stopping")
+                }
+                if assistantCapturing {
+                    guard body["sid"] as? String == sid else { throw BridgeError(status: 409, message: "Assistant audio session changed or sid is missing") }
+                } else if let requested = body["sid"] as? String, requested != sid {
+                    throw BridgeError(status: 409, message: "Microphone session changed")
+                }
+                return sid
+            }
+            if let expected { return try displays.updateSharedSpeechText(body, expectedSID: expected, clear: path.hasSuffix("/clear")) }
+            return nil
+        }
+        if path.hasPrefix("/v1/assistant-audio/") {
+            return try queue.sync {
+                switch (method, path) {
+                case ("POST", "/v1/assistant-audio/start"):
+                    let channel = body["channel"] as? Int ?? 0
+                    guard (0...2).contains(channel) else { throw BridgeError(status: 400, message: "channel must be 0 (mix), 1, or 2") }
+                    let rate = body["sample_rate"] as? Int ?? 16000
+                    guard [16000, 48000].contains(rate) else { throw BridgeError(status: 400, message: "sample_rate must be 16000 or 48000") }
+                    let layout = body["pcm_layout"] as? String ?? "mono"
+                    guard ["mono", "stereo"].contains(layout) else { throw BridgeError(status: 400, message: "pcm_layout must be mono or stereo") }
+                    let stereo = layout == "stereo"
+                    let feed = AssistantAudioFeed(channels: stereo ? 2 : 1, sampleRate: rate)
+                    try start(locale: "zh-CN", duration: body["duration"] as? Int ?? 300, recognize: false,
+                              record: false, assistantFeed: feed, assistantChannel: channel, assistantSampleRate: rate, assistantStereo: stereo)
+                    return (200, status())
+                case ("POST", "/v1/assistant-audio/events"):
+                    guard let assistantFeed else { throw BridgeError(status: 409, message: "Start assistant audio first") }
+                    var response = assistantFeed.read(after: body["after"] as? Int ?? 0)
+                    response["audioStatus"] = status()
+                    return (200, response)
+                case ("POST", "/v1/assistant-audio/stop"):
+                    if let expected = body["sid"] as? String, let sid, expected != sid {
+                        throw BridgeError(status: 409, message: "Audio capture SID changed; the newer session was preserved")
+                    }
+                    if assistantCapturing { stop() }
+                    return (200, status())
+                default: return nil
+                }
+            }
+        }
         if method == "POST", path.hasPrefix("/v1/prompts/") {
             return try queue.sync {
                 switch path {
-                case "/v1/prompts/start" where body["microphone_enabled"] as? Bool ?? true:
+                case "/v1/prompts/start" where body["microphone_enabled"] as? Bool ?? false:
                     try start(locale: "zh-CN", duration: body["duration"] as? Int ?? 3_600,
                               recognize: false, record: false, forwardMicrophones: true)
                     var response = status()
                     response["accepted"] = true
                     return (200, response)
-                case "/v1/prompts/text" where running && !virtualMicrophones.isEmpty:
-                    return try displays.route(method: method, path: path, body: body, forSpeech: true)
-                case "/v1/prompts/stop" where running && !virtualMicrophones.isEmpty:
+                case "/v1/prompts/stop" where running && (!virtualMicrophones.isEmpty || assistantCapturing):
                     stop()
                     return (200, status())
                 default:
@@ -261,10 +498,16 @@ final class SpeechController {
         let outputs = virtualMicrophones.map { $0.status }
         let audioState: String
         if !running { audioState = "stopped" }
+        else if transportSuspended { audioState = "disconnected" }
+        else if remotePaused { audioState = "paused" }
         else if outputs.contains(where: { $0["recovering"] as? Bool == true }) { audioState = "recovering" }
         else if audioPackets == 0 || error != nil || Date().timeIntervalSince(lastAudioAt) > 10 { audioState = "waiting" }
         else { audioState = "receiving" }
-        return ["running": running, "audioState": audioState, "source": "glasses", "engine": !virtualMicrophones.isEmpty ? "virtual-microphone" : recognitionEnabled ? "apple-on-device" : "recording-only",
+        return ["running": running, "audioState": audioState, "source": "glasses", "engine": assistantCapturing ? "assistant-realtime" : !virtualMicrophones.isEmpty ? "virtual-microphone" : recognitionEnabled ? "apple-on-device" : "recording-only",
+                "assistantChannel": assistantChannel, "assistantSampleRate": assistantSampleRate,
+                "assistantChannels": assistantStereo ? 2 : 1, "pcmLayout": assistantStereo ? "stereo" : "mono",
+                "assistantRoundID": assistantRoundID as Any? ?? NSNull(), "stopping": stoppingDisplay,
+                "remotePaused": remotePaused, "remoteControlReason": remoteControlReason as Any? ?? NSNull(),
                 "locale": locale, "speechAuthorization": SFSpeechRecognizer.authorizationStatus().rawValue,
                 "sid": sid as Any? ?? NSNull(), "audioPackets": audioPackets,
                 "decodedSeconds": decodedSeconds, "decodeErrors": decodeErrors,
@@ -277,9 +520,50 @@ final class SpeechController {
                 "error": error as Any? ?? NSNull()]
     }
 
+    private func prepareRecognizer(_ language: String) throws -> SFSpeechRecognizer? {
+        guard DisplayController.promptLanguages.contains(language) else {
+            throw BridgeError(status: 400, message: "不支持的实时提示语言。")
+        }
+        guard recognitionEnabled else { return nil }
+        let candidate = SFSpeechRecognizer(locale: Locale(identifier: language))
+        guard candidate?.isAvailable == true, candidate?.supportsOnDeviceRecognition == true else {
+            throw BridgeError(status: 503, message: "On-device speech recognition is unavailable for \(language); current language is preserved")
+        }
+        return candidate
+    }
+
+    private func changeHostLanguage(_ language: String, reason: String, prepared: SFSpeechRecognizer? = nil) throws {
+        let candidate = try prepared ?? prepareRecognizer(language)
+        if assistantCapturing { endAssistantRound(reason: reason) }
+        taskID = UUID()
+        request?.endAudio(); task?.cancel(); request = nil; task = nil
+        locale = language
+        if recognitionEnabled {
+            recognizer = candidate
+            transcript = ""; desiredDisplayText = ""
+            if !remotePaused { beginRecognition() }
+        }
+        if assistantCapturing, !remotePaused { beginAssistantRound(reason: reason) }
+    }
+
+    private func beginAssistantRound(reason: String) {
+        guard let sid, let assistantFeed else { return }
+        let id = assistantRoundID == nil && reason == "capture_start" ? sid : "\(sid):asr:\(UUID().uuidString)"
+        assistantRoundID = id
+        assistantFeed.append("begin", round: id, metadata: ["sourceSID": sid, "language": locale, "boundary": reason, "sampleRate": assistantSampleRate])
+    }
+
+    private func endAssistantRound(reason: String) {
+        guard let id = assistantRoundID, let assistantFeed else { return }
+        if !assistantPCM.isEmpty { assistantFeed.append("pcm", round: id, pcm: assistantPCM); assistantPCM = Data() }
+        assistantFeed.append("end", round: id, metadata: ["sourceSID": sid ?? "", "boundary": reason])
+        assistantRoundID = nil
+    }
+
     private func start(locale: String, duration: Int, recognize: Bool, record: Bool,
-                       virtualDeviceUID: String? = nil, channel: Int = 1, forwardMicrophones: Bool = false) throws {
-        guard !running else { throw BridgeError(status: 409, message: "An audio session is already running") }
+                       virtualDeviceUID: String? = nil, channel: Int = 1, forwardMicrophones: Bool = false,
+                       assistantFeed: AssistantAudioFeed? = nil, assistantChannel: Int = 0, assistantSampleRate: Int = 16000, assistantStereo: Bool = false) throws {
+        guard !running, !stoppingDisplay else { throw BridgeError(status: 409, message: "An audio session is running or its page is still closing") }
         let limit = recognize ? 600 : 21_600
         guard (10...limit).contains(duration) else { throw BridgeError(status: 400, message: "duration must be between 10 and \(limit) seconds") }
         var recognizer: SFSpeechRecognizer?
@@ -293,7 +577,8 @@ final class SpeechController {
             }
         }
         let decoder = recognize ? try OpusDecoder() : nil
-        let stereoDecoder = record || forwardMicrophones ? try OpusDecoder(sampleRate: 48_000, channels: 2) : nil
+        let stereoDecoder = record || forwardMicrophones || assistantFeed != nil
+            ? try OpusDecoder(sampleRate: assistantFeed == nil ? 48_000 : assistantSampleRate, channels: 2) : nil
         let microphones: [VirtualMicrophone]
         if forwardMicrophones {
             microphones = try virtualDeviceUID.map { [try VirtualMicrophone(deviceUID: $0, channel: channel)] }
@@ -301,7 +586,7 @@ final class SpeechController {
         } else { microphones = [] }
         microphones.forEach { $0.startWithRecovery() }
         let sid: String
-        do { sid = try displays.startSpeechDisplay() }
+        do { sid = try displays.startSpeechDisplay(languageOverride: recognize ? locale : nil) }
         catch { microphones.forEach { $0.stop() }; throw error }
         let recording: WAVRecording?
         do { recording = record ? try WAVRecording() : nil }
@@ -313,10 +598,23 @@ final class SpeechController {
         self.virtualMicrophones = microphones
         recognitionEnabled = recognize
         self.sid = sid
-        self.locale = locale
+        self.assistantCapturing = assistantFeed != nil
+        self.assistantRoundID = nil
+        self.assistantChannel = assistantChannel
+        self.assistantStereo = assistantStereo
+        self.assistantSampleRate = assistantSampleRate
+        self.assistantPCM = Data()
+        self.assistantStopping = false
+        self.assistantSequences = []
+        self.assistantFeed = assistantFeed
+        let captionStatus = try? displays.route(method: "GET", path: "/v1/caption-settings", body: [:])
+        let settings = captionStatus?.1["activePromptSettings"] as? [String: Any]
+        self.locale = recognize ? locale : settings?["source_language"] as? String ?? locale
+        if assistantFeed != nil { beginAssistantRound(reason: "capture_start") }
         error = nil
         transcript = ""
         displayedText = ""
+        desiredDisplayText = ""; displayUpdatePending = false; stopCompletion = nil
         audioPackets = 0
         decodedSeconds = 0
         encodedChannelCounts = [:]
@@ -329,6 +627,10 @@ final class SpeechController {
         overflowPackets = 0
         pendingLock.unlock()
         running = true
+        remotePaused = false
+        transportSuspended = false
+        audioAcceptedAfter = Date()
+        remoteControlReason = nil
         deadline = Date().addingTimeInterval(Double(duration))
         lastAudioAt = Date()
         if recognize { beginRecognition() }
@@ -370,6 +672,9 @@ final class SpeechController {
         guard pendingPackets < 64 else {
             overflowPackets += 1
             pendingLock.unlock()
+            queue.async { [weak self] in
+                if let self, self.assistantCapturing { self.assistantFeed?.append("gap", round: self.assistantRoundID ?? self.sid ?? "unknown") }
+            }
             return
         }
         pendingPackets += 1
@@ -386,22 +691,30 @@ final class SpeechController {
     }
 
     private func consume(_ message: RemoteMessage) {
-        guard running, message.protocolID == 0x17, message.json?["sid"] as? String == sid,
+        guard running, !remotePaused, message.receivedAt >= audioAcceptedAfter,
+              message.protocolID == 0x17, message.json?["sid"] as? String == sid,
               let audio = message.audioData, !audio.isEmpty else { return }
         audioPackets += 1
         lastAudioAt = Date()
         if let sequence = (message.json?["seq"] as? NSNumber)?.intValue {
-            if let previous = lastAudioSequence, sequence > previous + 1 { missingAudioPackets += sequence - previous - 1 }
+            if assistantCapturing {
+                if assistantSequences.contains(sequence) { return }
+                assistantSequences.append(sequence)
+                if assistantSequences.count > 128 { assistantSequences.removeFirst() }
+            }
+            if let previous = lastAudioSequence {
+                if sequence > previous + 1 {
+                    missingAudioPackets += sequence - previous - 1
+                    if assistantCapturing { assistantFeed?.append("gap", round: assistantRoundID ?? sid ?? "unknown") }
+                }
+            }
             lastAudioSequence = sequence
         }
         let mono: AVAudioPCMBuffer?
         let stereo: AVAudioPCMBuffer?
         do {
-            if !virtualMicrophones.isEmpty, stereoDecoder?.encodedChannels(audio) != 2 {
-                error = "眼镜暂未提供双声道音频，麦克风页面已保留；可以重新进入麦克风模式。"
-                decodeErrors += 1
-                return
-            }
+            // Opus coded mono/stereo is per packet. The negotiated stereo decoder still
+            // produces two lanes for a mono-coded packet; TOC is diagnostic, not identity.
             mono = try decoder?.decode(audio)
             stereo = try stereoDecoder?.decode(audio)
             guard let buffer = mono ?? stereo else { return }
@@ -417,6 +730,7 @@ final class SpeechController {
             level = sqrt(squareSum / Float(buffer.frameLength))
         } catch {
             decodeErrors += 1
+            if assistantCapturing { assistantFeed?.append("gap", round: assistantRoundID ?? sid ?? "unknown"); stop(); return }
             consecutiveDecodeErrors += 1
             if consecutiveDecodeErrors >= 5 {
                 self.error = "Repeated Opus decoding failures"
@@ -425,6 +739,10 @@ final class SpeechController {
             return
         }
         if let stereo {
+            if assistantCapturing, let roundID = assistantRoundID, let feed = assistantFeed {
+                assistantPCM.append(AssistantPCMCodec.encode(stereo, channel: assistantChannel, stereo: assistantStereo))
+                if assistantPCM.count >= assistantSampleRate / 5 * 2 * (assistantStereo ? 2 : 1) { feed.append("pcm", round: roundID, pcm: assistantPCM); assistantPCM = Data() }
+            }
             virtualMicrophones.forEach { $0.append(stereo) }
             do { try recording?.append(stereo) }
             catch {
@@ -440,30 +758,65 @@ final class SpeechController {
         guard running else { return }
         virtualMicrophones.forEach { $0.maintainOutput() }
         if Date() >= deadline { stop(); return }
-        if virtualMicrophones.isEmpty, Date().timeIntervalSince(lastAudioAt) > 10 {
+        if remotePaused { return }
+        if virtualMicrophones.isEmpty, !assistantCapturing, Date().timeIntervalSince(lastAudioAt) > 10 {
             error = "No glasses audio received for 10 seconds"
+            if assistantCapturing { assistantFeed?.append("gap", round: sid ?? "unknown") }
             stop()
             return
         }
         let text = String(transcript.suffix(96))
         if !text.isEmpty, text != displayedText, Date().timeIntervalSince(lastDisplayAt) >= 0.25 {
-            do {
-                try displays.updateSpeechText(text)
-                displayedText = text
-                lastDisplayAt = Date()
-            } catch {
-                self.error = "Could not update the glasses display"
-                stop()
-                return
-            }
+            desiredDisplayText = text
+            scheduleDisplayUpdate()
         }
         // Apple recognition tasks are finite; renew before a long-running limit.
         if recognitionEnabled, Date().timeIntervalSince(taskStarted) > 45 { beginRecognition() }
     }
 
+    private func scheduleDisplayUpdate() {
+        guard running, !remotePaused, !stoppingDisplay, !displayUpdatePending, let expectedSID = sid else { return }
+        let text = desiredDisplayText
+        displayUpdatePending = true
+        displayQueue.async { [weak self, displays] in
+            var failure: String?
+            do { _ = try displays.updateSharedSpeechText(["text": "实时语音识别", "translation": text, "final": true], expectedSID: expectedSID) }
+            catch { failure = error.localizedDescription }
+            self?.queue.async { [weak self] in
+                guard let self, self.running, self.sid == expectedSID else { return }
+                self.displayUpdatePending = false
+                guard !self.remotePaused else { return }
+                if let failure { self.error = failure; self.stop() }
+                else { self.displayedText = text; self.lastDisplayAt = Date() }
+            }
+        }
+    }
+
     private func stop() {
+        guard running, !stoppingDisplay else { return }
+        stoppingDisplay = true
+        stopWasAssistant = assistantCapturing
+        stopWasShared = assistantCapturing || !virtualMicrophones.isEmpty
+        let completion = DispatchGroup(); completion.enter(); stopCompletion = completion
+        displays.invalidateSpeechUpdates(expectedSID: sid)
+        if assistantCapturing {
+            guard !assistantStopping else { return }
+            assistantStopping = true
+            transport.setAudioHandler(nil)
+            // Handler removal waits for prior receive callbacks. This barrier runs after their queued packets.
+            queue.async { [weak self] in self?.finishStop() }
+            return
+        }
+        finishStop()
+    }
+
+    private func finishStop() {
         guard running else { return }
         running = false
+        if assistantCapturing, let feed = assistantFeed {
+            endAssistantRound(reason: "capture_stop"); feed.finish()
+        }
+        assistantCapturing = false
         transport.setAudioHandler(nil)
         timer?.cancel()
         timer = nil
@@ -478,7 +831,18 @@ final class SpeechController {
         virtualMicrophones.forEach { $0.stop() }
         do { try recording?.finish() }
         catch { self.error = (self.error.map { $0 + "; " } ?? "") + "WAV finalization failed: \(error.localizedDescription)" }
-        do { try displays.stopSpeechDisplay() }
-        catch { self.error = (self.error.map { $0 + "; " } ?? "") + "Could not confirm sending the glasses stop command; exit the page manually" }
+        let closingSID = sid, completion = stopCompletion
+        displayQueue.async { [weak self, displays] in
+            var failure: String?
+            do { try displays.stopSpeechDisplay(expectedSID: closingSID) }
+            catch { failure = "Could not confirm sending the glasses stop command; exit the page manually" }
+            guard let self else { completion?.leave(); return }
+            self.queue.async { [weak self] in
+                defer { completion?.leave() }
+                guard let self else { return }
+                if let failure { self.error = (self.error.map { $0 + "; " } ?? "") + failure }
+                self.stoppingDisplay = false
+            }
+        }
     }
 }

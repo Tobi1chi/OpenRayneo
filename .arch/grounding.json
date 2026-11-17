@@ -1,0 +1,70 @@
+{
+  "sources": [
+    {
+      "type": "code_ref",
+      "source": "ssh://ubuntu-rx7800xt/home/tobiichieigetsu/openrayneo-lab/three-way-2026-11-11/simplified-33/production-changes.tar.gz :: android/app/src/main/java/com/openrayneo/android/LocalAgentServer.kt:84-108; DshRelay.kt:32-66; integrations/dsh-go/README.md:3-9,20-26",
+      "note": "历史Android33/DSH0.1.6差分源归档，作为旧实现证据保留。当前本地实现、记录同步与候选版本以.arch/ground_truth.md为准。",
+      "added_at": "2026-11-16T06:35:42"
+    },
+    {
+      "type": "human_verify",
+      "source": "用户已确认的项目约束与本次文档整理要求",
+      "note": "眼镜已有官方能力为边界；本机Agent接入、双端职责、双通道本人/环境分工、原生跨wake会话复用已确认。Mac自动保留最近完整原音。用户明确以.arch为核心，只保留少量操作与合同文档；已授权开发及Trash清理，保留既有未提交源码。",
+      "added_at": "2026-11-17T03:09:58+08:00"
+    },
+    {
+      "type": "doc_ref",
+      "source": ".arch/dashboard.html",
+      "note": "唯一生成架构看板，节点、契约及源归属由arch CLI维护；当前事实与质量边界见ground_truth。",
+      "added_at": "2026-11-17T03:09:58+08:00"
+    },
+    {
+      "type": "doc_ref",
+      "source": ".arch/ground_truth.md",
+      "note": "已确认约束、当前实现、候选与未解决问题的当前快照，替代分散的计划/实施/审查流水报告；solid为已确认决策，构建和实机质量分别记录。",
+      "added_at": "2026-11-17T03:09:58+08:00"
+    },
+    {
+      "type": "doc_ref",
+      "source": "docs/runbook.md",
+      "note": "当前安装、构建、连接恢复、本机API/DSH、记录同步与声音文件操作。",
+      "added_at": "2026-11-17T03:09:58+08:00"
+    },
+    {
+      "type": "doc_ref",
+      "source": "docs/protocol.md",
+      "note": "活跃设备合同与原始源码/逆向证据索引；保留平台差异、确认层次与未验证设备边界。",
+      "added_at": "2026-11-17T03:09:58+08:00"
+    },
+    {
+      "type": "doc_ref",
+      "source": "docs/record-sync-contract.md",
+      "note": "手机权威记录与Mac副本、共享分页游标、音频按需与离线派生写回合同。",
+      "added_at": "2026-11-17T03:09:58+08:00"
+    },
+    {
+      "type": "doc_ref",
+      "source": ".agents/skills/openrayneo-api/SKILL.md",
+      "note": "可分发的本机HTTP API技能；精确参数见其references，原生最近完整音频自动落盘。",
+      "added_at": "2026-11-17T03:09:58+08:00"
+    },
+    {
+      "type": "doc_ref",
+      "source": "integrations/dsh-go/README.md",
+      "note": "当前DSH0.1.8与Android37接入；phone/key/preset持久会话绑定、按归属取消和当前wake回写边界。",
+      "added_at": "2026-11-17T03:09:58+08:00"
+    },
+    {
+      "type": "doc_ref",
+      "source": "analysis/speaker-debug-2026-11-16/case.json",
+      "note": "当前匿名声纹案例：完整实际native输入、单人真值、最高本人0.624/门槛0.70、6参考留一互验2份低于门槛、参考逐分与query内部cosine及波形/模型条件；短句特征和质量策略待优化。旧arm/唤醒流水移出，数据只作本机开发证据。",
+      "added_at": "2026-11-17T03:09:58+08:00"
+    },
+    {
+      "type": "doc_ref",
+      "source": "https://www.rfc-editor.org/rfc/rfc6716.html#section-2.1.2",
+      "note": "Android子代理已核对：同Opus流可逐帧mono/stereo coded，立体声输入可编码mono，双通道decoder输出复制L/R。路别策略按会话/实际PCM格式，不能把TOC编码声道数当物理通道数触发拒包或分卷。",
+      "added_at": "2026-11-16T12:37:05"
+    }
+  ]
+}

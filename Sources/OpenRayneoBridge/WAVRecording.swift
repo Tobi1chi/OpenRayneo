@@ -15,11 +15,12 @@ final class WAVRecording {
     private var lastCheckpoint = Date()
     private(set) var finalized = false
 
-    init(sampleRate: Int = 48_000, channels: Int = 2) throws {
+    init(sampleRate: Int = 48_000, channels: Int = 2, directory destination: URL? = nil, namePrefix: String = "rayneo") throws {
         self.sampleRate = sampleRate
         self.channels = channels
         let directory: URL
-        if let configured = ProcessInfo.processInfo.environment["OPENRAYNEO_RECORDINGS_DIR"] {
+        if let destination { directory = destination }
+        else if let configured = ProcessInfo.processInfo.environment["OPENRAYNEO_RECORDINGS_DIR"] {
             directory = URL(fileURLWithPath: configured, isDirectory: true)
         } else {
             let music = FileManager.default.urls(for: .musicDirectory, in: .userDomainMask).first!
@@ -29,7 +30,7 @@ final class WAVRecording {
         let date = DateFormatter()
         date.locale = Locale(identifier: "en_US_POSIX")
         date.dateFormat = "yyyyMMdd-HHmmss"
-        url = directory.appendingPathComponent("rayneo-\(date.string(from: Date()))-\(UUID().uuidString.prefix(8)).wav")
+        url = directory.appendingPathComponent("\(namePrefix)-\(date.string(from: Date()))-\(UUID().uuidString.prefix(8)).wav")
         let descriptor = Darwin.open(url.path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else { throw BridgeError(status: 503, message: "Could not create the WAV recording") }
         file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
@@ -49,9 +50,6 @@ final class WAVRecording {
               buffer.format.sampleRate == Double(sampleRate), let samples = buffer.floatChannelData else {
             throw BridgeError(status: 503, message: "Unexpected WAV audio format")
         }
-        guard UInt64(dataBytes) + UInt64(byteCount) <= UInt64(UInt32.max) - 36 else {
-            throw BridgeError(status: 413, message: "Recording reached the classic WAV 4 GiB limit")
-        }
         var pcm = Data(capacity: byteCount)
         for frame in 0..<frameCount {
             for channel in 0..<channels {
@@ -59,8 +57,19 @@ final class WAVRecording {
                 pcm.appendLittleEndian(UInt16(bitPattern: sample))
             }
         }
+        try appendPCM16(pcm)
+    }
+
+    /// Already encoded PCM uses the same byte representation as the ASR feed.
+    func appendPCM16(_ pcm: Data) throws {
+        guard !finalized, pcm.count.isMultiple(of: channels * 2) else {
+            throw BridgeError(status: 503, message: "Unexpected WAV PCM16 frame layout")
+        }
+        guard UInt64(dataBytes) + UInt64(pcm.count) <= UInt64(UInt32.max) - 36 else {
+            throw BridgeError(status: 413, message: "Recording reached the classic WAV 4 GiB limit")
+        }
         try file.write(contentsOf: pcm)
-        dataBytes += UInt32(byteCount)
+        dataBytes += UInt32(pcm.count)
         if Date().timeIntervalSince(lastCheckpoint) >= 1 {
             try checkpoint()
             lastCheckpoint = Date()

@@ -4,16 +4,40 @@
 *.app/
 DerivedData/
 
+# Architecture source of truth; the local shadow Git is never a submodule
+/.arch/*
+!/.arch/SEED.md
+!/.arch/graph.json
+!/.arch/ground_truth.md
+!/.arch/graveyard.md
+!/.arch/grounding.json
+!/.arch/dashboard.html
+/.arch/.git/
+
 # Android builds and machine-specific SDK paths
 android/.gradle/
 android/.kotlin/
 android/**/build/
 android/local.properties
+android/app/libs/*.aar
+android/app/libs/*.part
+android/app/src/main/assets/voice-models/*.onnx
+android/app/src/main/assets/voice-models/*.part
 
 # Local configuration and credentials
 .env
+node_modules/
 .env.*
 !.env.example
+*.keystore
+*.jks
+*.p12
+*.pfx
+
+# Python environments and bytecode
+.venv/
+__pycache__/
+*.py[cod]
 
 # Official packages, device captures, and analysis workspace
 *.apk

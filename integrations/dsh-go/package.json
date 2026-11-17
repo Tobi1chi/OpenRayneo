@@ -1,0 +1,86 @@
+{
+  "name": "openrayneo-dsh",
+  "version": "0.1.8",
+  "description": "Connect DSH Go voice tasks and tools to the local OpenRayneo glasses companion.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24.9",
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-credentials": ">=0.2.2-rc.1 <0.3.0-0",
+    "@deepseek-ai/schemastery": "~3.19.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.1 <0.3.0-0",
+    "zod": "^4.4.3",
+    "@deepseek-ai/dsh-storage-domain": ">=0.2.2-rc.1 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dshGo": {
+    "v": 1,
+    "title": {
+      "zh": "OpenRayneo 眼镜",
+      "en": "OpenRayneo glasses"
+    },
+    "icon": "link",
+    "wants": [
+      "message",
+      "clipboard"
+    ],
+    "contributes": {
+      "composer.actions": [
+        {
+          "id": "connect",
+          "label": {
+            "zh": "连接眼镜",
+            "en": "Connect"
+          },
+          "icon": "link"
+        },
+        {
+          "id": "status",
+          "label": {
+            "zh": "眼镜状态",
+            "en": "Glasses"
+          },
+          "icon": "info"
+        }
+      ],
+      "message.actions": [
+        {
+          "id": "send-glasses",
+          "label": {
+            "zh": "发到眼镜",
+            "en": "To glasses"
+          },
+          "icon": "send"
+        },
+        {
+          "id": "clear-glasses",
+          "label": {
+            "zh": "清空眼镜",
+            "en": "Clear"
+          },
+          "icon": "delete"
+        }
+      ]
+    }
+  }
+}

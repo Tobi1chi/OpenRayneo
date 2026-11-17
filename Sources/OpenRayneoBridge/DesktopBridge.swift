@@ -10,11 +10,15 @@ import UniformTypeIdentifiers
 struct PairedGlasses: Identifiable, Sendable {
     let id: String
     let name: String
+    let deviceType: String?
+    init(id: String, name: String, deviceType: String? = nil) {
+        self.id = id; self.name = name; self.deviceType = deviceType
+    }
 }
 
 enum DesktopSession: String {
-    case navigation, video, captions, prompts, teleprompter, asr, recording, lifeLog
-    var isAudio: Bool { self == .asr || self == .recording || self == .prompts }
+    case navigation, video, captions, prompts, teleprompter, asr, recording, lifeLog, assistantAudio, nativeAssistant
+    var isAudio: Bool { self == .asr || self == .recording || self == .prompts || self == .assistantAudio }
     var stopPath: String {
         switch self {
         case .navigation, .video, .captions: return "/v1/captions/stop"
@@ -22,6 +26,8 @@ enum DesktopSession: String {
         case .teleprompter: return "/v1/teleprompter/stop"
         case .asr, .recording: return "/v1/asr/stop"
         case .lifeLog: return "/v1/lifelog/stop"
+        case .assistantAudio: return "/v1/assistant-audio/stop"
+        case .nativeAssistant: return "/v1/assistant/native/stop"
         }
     }
     var title: String {
@@ -34,6 +40,8 @@ enum DesktopSession: String {
         case .asr: return "语音识别"
         case .recording: return "录音"
         case .lifeLog: return "全天智记实验"
+        case .assistantAudio: return "AI 实时双麦识别"
+        case .nativeAssistant: return "眼镜原生助手"
         }
     }
 }
@@ -45,6 +53,28 @@ private struct DesktopError: LocalizedError {
 
 @MainActor
 final class DesktopBridge: ObservableObject {
+    lazy var homeContent = HomeContentModel(bridge: self)
+    lazy var glassesSettings = GlassesSettingsModel(bridge: self)
+    lazy var captionSettings = CaptionSettingsModel(bridge: self)
+    lazy var schedules = SchedulesModel(bridge: self)
+    lazy var calendarSync = CalendarSyncModel(bridge: self)
+    lazy var currentLocationWeather = CurrentLocationWeatherModel(bridge: self)
+    lazy var nativeRecording = NativeRecordingModel(bridge: self)
+    lazy var recordingLibrary = RecordingLibraryModel(bridge: self)
+    let voiceLab = LocalVoiceLab()
+    let localASR = LocalASRSettings.shared
+    lazy var memoryLibrary = MemoryLibraryModel(assistant: assistant)
+    lazy var notificationMirror = NotificationMirrorModel(bridge: self)
+    lazy var files = FileTransfersModel(bridge: self)
+    lazy var dashboardCards = DashboardCardsModel(bridge: self)
+    lazy var dashboardLayout = DashboardLayoutModel(bridge: self)
+    lazy var mailDashboard = MailDashboardModel(bridge: self)
+    lazy var maintenance = MaintenanceModel(bridge: self)
+    lazy var feedback = OfficialFeedbackModel(bridge: self)
+    lazy var teleprompterLibrary = TeleprompterLibraryModel(bridge: self)
+    lazy var ota = OTAUpdateModel(bridge: self)
+    lazy var cloudDevices = OfficialCloudDevicesModel(bridge: self)
+    let assistant = DesktopAssistant()
     @Published var devices: [PairedGlasses] = []
     @Published var selectedAddress = ""
     @Published private(set) var connected = false
@@ -53,6 +83,7 @@ final class DesktopBridge: ObservableObject {
     @Published private(set) var restartingService = false
     @Published private(set) var refreshingDevices = false
     @Published private(set) var pairingActive = false
+    @Published private(set) var officialDeviceOperationActive = false
     @Published private(set) var verifiedPairingAddress: String?
     @Published private(set) var busy = false
     @Published private(set) var stopping = false
@@ -67,6 +98,7 @@ final class DesktopBridge: ObservableObject {
     @Published private(set) var lifeLogSeconds = 0.0
     @Published private(set) var lifeLogChannels = "尚未收到音频"
     @Published private(set) var lifeLogDecodeErrors = 0
+    @Published private(set) var lifeLogEnabled: Bool?
     @Published private(set) var virtualAudioDevices: [VirtualAudioDevice] = []
     @Published private(set) var virtualMicrophoneName: String?
     @Published private(set) var microphoneForwarding = false
@@ -81,19 +113,24 @@ final class DesktopBridge: ObservableObject {
     @Published private(set) var apiAddress = ""
     @Published private(set) var diagnostics = ""
     @Published private(set) var apiVerifiedAt: Date?
+    @Published private(set) var nativeWakeID: String?
+    @Published private(set) var nativeAssistantActive = false
+    @Published private(set) var nativeAssistantAudioPackets = 0
     @Published private(set) var textVideo: TextVideo?
     @Published private(set) var videoImporting = false
     @Published private(set) var videoPlaying = false
     @Published private(set) var videoSeconds = 0.0
     @Published private(set) var videoPreview = ""
 
-    var apiReady: Bool { serviceRunning && connected && apiVerifiedAt != nil }
+    var apiReady: Bool { serviceRunning && (connected || localServicesOnly) && apiVerifiedAt != nil }
+    @Published private(set) var localServicesOnly = false
     var selectedDevice: PairedGlasses? { devices.first { $0.id == selectedAddress } }
 
     var apiExample: String {
         "curl '\(apiAddress.isEmpty ? "http://127.0.0.1:8765" : apiAddress)/v1/device' \\\n  -H 'Authorization: Bearer <API_TOKEN>'"
     }
 
+    private var nativeCaptureID: String?
     private var service: Process?
     private var navigationFrameSent = false
     private var lastPromptContent: [String: Any]?
@@ -106,12 +143,65 @@ final class DesktopBridge: ObservableObject {
     private var operation: Task<Void, Never>?
     private var operationID: UUID?
     private var monitor: Task<Void, Never>?
+    private var appForeground = false
+    private var visibilityRevision = 0
+    private var visibilityTask: Task<Void, Never>?
+    private var visibilityTaskID = UUID()
+    private var visibilityDisplayedError: String?
+    private var lastSynchronizedGeneration: Int?
+    private var lifecycleObservers: [NSObjectProtocol] = []
     private let network: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 75
         configuration.timeoutIntervalForResource = 90
         return URLSession(configuration: configuration)
     }()
+
+    init() {
+        appForeground = NSApp.isActive
+        _ = homeContent
+        _ = currentLocationWeather
+        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
+            lifecycleObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.appForeground = NSApp.isActive
+                    self.scheduleVisibilitySync()
+                }
+            })
+        }
+    }
+
+    deinit {
+        for observer in lifecycleObservers { NotificationCenter.default.removeObserver(observer) }
+        visibilityTask?.cancel()
+    }
+
+    private func scheduleVisibilitySync() {
+        guard let child = service, child.isRunning, !stopping else { return }
+        visibilityRevision += 1
+        guard visibilityTask == nil else { return }
+        let id = UUID(); visibilityTaskID = id
+        visibilityTask = Task { [weak self, weak child] in
+            guard let self, let child else { return }
+            defer { if self.visibilityTaskID == id { self.visibilityTask = nil } }
+            while self.service === child, child.isRunning, !Task.isCancelled {
+                let revision = self.visibilityRevision, foreground = self.appForeground
+                do {
+                    _ = try await self.request("/v1/device/visibility", body: ["isAppForeground": foreground], timeout: 8)
+                    guard self.service === child, self.visibilityTaskID == id, !Task.isCancelled else { return }
+                    if self.errorMessage == self.visibilityDisplayedError { self.errorMessage = nil }
+                    self.visibilityDisplayedError = nil
+                } catch {
+                    guard self.service === child, self.visibilityTaskID == id, !Task.isCancelled else { return }
+                    let message = "前后台状态同步失败：\(error.localizedDescription)"
+                    self.visibilityDisplayedError = message; self.errorMessage = message
+                }
+                guard self.service === child, self.visibilityTaskID == id, !Task.isCancelled else { return }
+                if revision == self.visibilityRevision { return }
+            }
+        }
+    }
 
     func refreshDevices() {
         guard !serviceRunning, !refreshingDevices, !pairingActive else { return }
@@ -149,23 +239,33 @@ final class DesktopBridge: ObservableObject {
             self.verifiedPairingAddress = nil
             self.pairingActive = true
             defer { self.pairingActive = false }
-            guard let device = try await self.pairing.pair(progress: { phase, notice in
+            guard let result = try await self.pairing.pair(progress: { phase, notice in
                 self.phase = phase
                 self.notice = notice
+            }, preflight: { device in
+                if OfficialCloudPolicy.enabled { try await self.cloudDevices.preflightPairing(device) }
+            }, prepareSystemPairing: { device in
+                self.selectedAddress = device.id
+                self.setApplicationRegistrationPending(true, address: device.id)
+                try await self.startService()
+                _ = try await self.request("/v1/device/pairing/prepare", body: [:], timeout: 25)
             }) else {
                 self.phase = "配对已取消"
                 self.notice = "已取消配对，未启动 API。"
                 return
             }
+            let device = result.device
             self.devices.removeAll { $0.id == device.id }
             self.devices.append(device)
             self.selectedAddress = device.id
+            self.setApplicationRegistrationPending(result.intent == .register, address: device.id)
             self.verifiedPairingAddress = device.id
+            if OfficialCloudPolicy.enabled { self.cloudDevices.recordPairedDevice(device) }
             UserDefaults.standard.set(device.id, forKey: "selectedGlasses")
             self.pairingActive = false
             self.notice = "配对完成，正在连接并启用 API…"
             try await self.ensureConnected()
-            try await self.startDefaultPromptIfIdle()
+            try await self.restoreDeviceSessionIfNeeded()
             self.notice = "配对、连接已完成，本机 API 已就绪。"
         }
     }
@@ -176,25 +276,71 @@ final class DesktopBridge: ObservableObject {
     }
 
     func connect() {
+        guard !busy, !stopping else { return }
+        setApplicationRegistrationPending(false, address: selectedAddress)
+        // Stop outside perform: shutdown cancels and awaits the current operation.
+        // Calling it from that operation would make the task await itself.
+        if serviceRunning && !connected {
+            Task {
+                guard await shutdown() else { return }
+                self.connect()
+            }
+            return
+        }
         perform("正在连接眼镜…") {
             try await self.ensureConnected()
-            try await self.startDefaultPromptIfIdle()
+            try await self.restoreDeviceSessionIfNeeded()
         }
     }
 
     func disconnect() {
+        guard !officialDeviceOperationActive else { return }
         Task { if await shutdown() { notice = "已断开，后台服务已停止。" } }
     }
 
+    func beginOfficialDeviceOperation() throws {
+        guard !busy, !stopping, !pairingActive, !officialDeviceOperationActive else {
+            throw DesktopError(message: "请等待当前连接操作结束后再解绑。")
+        }
+        officialDeviceOperationActive = true
+    }
+    func endOfficialDeviceOperation() { officialDeviceOperationActive = false }
+
+    func isConnected(toOfficialMAC mac: String?) -> Bool {
+        guard let mac else { return false }
+        return connected && OfficialCloudDevicesModel.mac(selectedAddress) == OfficialCloudDevicesModel.mac(mac)
+    }
+
+    func eraseForOfficialUnbind(address: String) async throws {
+        guard isConnected(toOfficialMAC: address) else { throw DesktopError(message: "目标眼镜未连接。") }
+        try await prepareNativeRecording()
+        guard isConnected(toOfficialMAC: address) else { throw DesktopError(message: "目标连接已变化，未发送清除。") }
+        let response = try await request("/v1/glasses/unbind-reset", body: [:])
+        guard response["accepted"] as? Bool == true else { throw DesktopError(message: "眼镜未明确确认解绑清除。") }
+    }
+
+    func removeOfficialLocalPairing(address: String) async throws {
+        let selected = OfficialCloudDevicesModel.mac(selectedAddress) == OfficialCloudDevicesModel.mac(address)
+        if selected, serviceRunning {
+            guard await shutdown(sendDeviceCommands: false) else { throw DesktopError(message: "旧连接服务尚未停止，未移除配对。") }
+        }
+        try await pairing.unpair(address: address)
+        devices.removeAll { OfficialCloudDevicesModel.mac($0.id) == OfficialCloudDevicesModel.mac(address) }
+        if selected {
+            selectedAddress = ""; verifiedPairingAddress = nil
+            UserDefaults.standard.removeObject(forKey: "selectedGlasses")
+        }
+    }
+
     func restartConnectionService() {
-        guard !stopping, !restartingService, !pairingActive, !refreshingDevices, !selectedAddress.isEmpty else { return }
+        guard !stopping, !restartingService, !pairingActive, !refreshingDevices, !officialDeviceOperationActive, !selectedAddress.isEmpty else { return }
         restartingService = true
         Task {
             defer { restartingService = false }
             guard await shutdown() else { return }
             perform("正在重新启动连接服务…") {
                 try await self.ensureConnected()
-                try await self.startDefaultPromptIfIdle()
+                try await self.restoreDeviceSessionIfNeeded()
                 self.notice = "连接服务已重启，API 已就绪。请使用当前显示的地址与令牌。"
             }
         }
@@ -304,15 +450,23 @@ final class DesktopBridge: ObservableObject {
         videoPlaying = false
     }
 
-    func showText(_ text: String, translation: String, prompt: Bool, reopen: Bool = false) {
+    func showText(_ text: String, translation: String, prompt: Bool, reopen: Bool = false, final: Bool = true, clearAfterMilliseconds: Int = 0) {
         perform("正在发送文字…") {
             let mode: DesktopSession = prompt ? .prompts : .captions
             try await self.prepareDisplay(mode, reopen: reopen)
-            var body: [String: Any] = ["text": text, "final": true]
+            var body: [String: Any] = ["text": text, "final": final, "clear_after_ms": clearAfterMilliseconds]
             if prompt { body["translation"] = translation }
             _ = try await self.request(prompt ? "/v1/prompts/text" : "/v1/captions/text", body: body)
             if prompt { self.lastPromptContent = body }
             self.notice = "文字已发送。"
+        }
+    }
+
+    func clearDisplay(prompt: Bool) {
+        perform("正在清空眼镜画面…") {
+            _ = try await self.request(prompt ? "/v1/prompts/clear" : "/v1/captions/clear", body: [:])
+            self.lastPromptContent = nil
+            self.notice = "已发送清屏，显示会话保持打开。"
         }
     }
 
@@ -337,7 +491,21 @@ final class DesktopBridge: ObservableObject {
     func controlTeleprompter(_ action: String) {
         perform("正在控制提词器…") {
             _ = try await self.request("/v1/teleprompter/\(action)", body: [:])
-            self.notice = action == "pause" ? "暂停指令已发送。" : "继续指令已发送。"
+            if let state = try? await self.request("/v1/teleprompter", method: "GET", timeout: 2) {
+                self.teleprompterLibrary.ingestPlayback(state)
+            }
+            if action == "stop" { self.activeSession = nil }
+            self.notice = action == "pause" ? "暂停指令已发送。" : action == "stop" ? "停止指令已发送。" : "继续指令已发送。"
+        }
+    }
+
+    func synchronizeTeleprompterState() {
+        perform("正在核对眼镜提词状态…") {
+            let state = try await self.request("/v1/teleprompter/check-state", body: [:])
+            self.teleprompterLibrary.ingestPlayback(state)
+            if state["running"] as? Bool == true { self.activeSession = .teleprompter }
+            else if self.activeSession == .teleprompter { self.activeSession = nil }
+            self.notice = "眼镜提词状态已读回。"
         }
     }
 
@@ -369,8 +537,8 @@ final class DesktopBridge: ObservableObject {
             self.updateLifeLog(result)
             do {
                 let reply = try await self.request("/v1/lifelog/switch", body: ["enabled": true])
-                guard reply["acknowledged"] as? Bool == true else {
-                    throw DesktopError(message: "未收到全天智记开关应答。")
+                guard reply["accepted"] as? Bool == true else {
+                    throw DesktopError(message: reply["error"] as? String ?? "全天智记开关尚未确认成功。")
                 }
             } catch {
                 try? await self.stopCurrent()
@@ -378,6 +546,73 @@ final class DesktopBridge: ObservableObject {
             }
             self.notice = "全天智记观察已开始，可以自然说话或点击“触发一轮音频”。"
         }
+    }
+
+    func startAssistantLifeLog(duration: Int, preserveAudio: Bool = false, vadDelay: Int = 2) async throws {
+        try await ensureConnected()
+        try await stopCurrent()
+        _ = try await request("/v1/lifelog/observe", body: ["duration": duration, "assistant_capture": true,
+            "preserve_audio": preserveAudio, "vad_start_delay_sec": vadDelay])
+        activeSession = .lifeLog
+        do {
+            let reply = try await request("/v1/lifelog/switch", body: ["enabled": true])
+            guard reply["accepted"] as? Bool == true else {
+                throw DesktopError(message: reply["error"] as? String ?? "全天智记开关尚未确认成功。")
+            }
+        } catch { try? await stopCurrent(); throw error }
+    }
+
+    func startAssistantRealtime(duration: Int, channel: Int, sampleRate: Int = 16000, stereo: Bool = false) async throws -> String {
+        try await ensureConnected()
+        try await stopCurrent()
+        let response = try await request("/v1/assistant-audio/start", body: ["duration": duration, "channel": channel, "sample_rate": sampleRate, "pcm_layout": stereo ? "stereo" : "mono"])
+        activeSession = .assistantAudio
+        guard let sid = response["sid"] as? String else { throw DesktopError(message: "实时收音未返回会话标识") }
+        return sid
+    }
+
+    func startAssistantNative(duration: Int) async throws -> String {
+        try await ensureConnected()
+        guard let id = nativeWakeID, nativeAssistantActive else { throw DesktopError(message: "请先说小雷小雷唤醒眼镜。") }
+        try await stopCurrent()
+        _ = try await request("/v1/assistant/native/start", body: ["wakeID": id, "duration": duration])
+        activeSession = .nativeAssistant; nativeCaptureID = id
+        return id
+    }
+
+    func assistantAudioEvents(after: Int, source: AssistantCaptureSource) async throws -> [String: Any] {
+        let path = source == .native ? "/v1/assistant/native/audio" : source == .realtime ? "/v1/assistant-audio/events" : "/v1/lifelog/assistant-audio"
+        var body: [String: Any] = ["after": after]
+        if source == .native { body["wakeID"] = nativeCaptureID }
+        return try await request(path, body: body, timeout: 3)
+    }
+
+    func stopAssistantCapture(source: AssistantCaptureSource, expectedSID: String? = nil) async throws {
+        if source == .realtime, let expectedSID {
+            _ = try await request("/v1/assistant-audio/stop", body: ["sid": expectedSID])
+            if activeSession == .assistantAudio { activeSession = nil }
+            return
+        }
+        if activeSession == (source == .native ? .nativeAssistant : source == .realtime ? .assistantAudio : .lifeLog) { try await stopCurrent() }
+    }
+
+    func displayAssistantReply(_ text: String, source: AssistantCaptureSource, sid: String?, clearAfterMilliseconds: Int = 0, query: String = "") async throws -> String {
+        guard connected else { throw DesktopError(message: "眼镜未连接，结果已保留在 Mac") }
+        if source == .native {
+            guard nativeAssistantActive, let sid, sid == nativeWakeID else { throw DesktopError(message: "原生助手已退出，回复保留在 Mac。") }
+            _ = try await request("/v1/assistant/native/reply", body: ["wakeID": sid, "text": text, "query": query], timeout: 5)
+            return "native_assistant"
+        }
+        if source == .realtime {
+            guard activeSession == .assistantAudio, let sid else {
+                throw DesktopError(message: "实时提示收音会话已结束，回复保留在 Mac")
+            }
+            _ = try await request("/v1/prompts/text", body: ["sid": sid, "text": "AI 回复", "translation": text, "final": true, "clear_after_ms": clearAfterMilliseconds], timeout: 5)
+            return "realtime_prompt"
+        }
+        guard activeSession == .lifeLog else { throw DesktopError(message: "AlwaysOn 会话已结束，回复保留在 Mac") }
+        _ = try await request("/v1/notifications", body: ["title": "AI 回复", "body": text], timeout: 5)
+        return "notification"
     }
 
     func triggerLifeLogAudio() {
@@ -389,6 +624,7 @@ final class DesktopBridge: ObservableObject {
     }
 
     private func updateLifeLog(_ data: [String: Any]) {
+        if let enabled = data["observedEnabled"] as? Bool { lifeLogEnabled = enabled }
         let inspection = data["audioInspection"] as? [String: Any] ?? [:]
         lifeLogSeconds = inspection["decodedSeconds"] as? Double ?? 0
         lifeLogDecodeErrors = inspection["decodeErrors"] as? Int ?? 0
@@ -401,15 +637,16 @@ final class DesktopBridge: ObservableObject {
             "\($0) 声道：\(channels[$0]!) 帧"
         }.joined(separator: "；")
         if let error = data["error"] as? String { errorMessage = error }
+        if let error = inspection["captureError"] as? String { errorMessage = error }
     }
 
     func enterMicrophoneMode() {
         perform("正在进入麦克风模式…") {
             self.refreshVirtualAudioDevices()
             guard self.builtInMicrophonesReady else {
-                throw DesktopError(message: "请先在“设备与 API”安装内置驱动并刷新设备，再进入麦克风模式。")
+                throw DesktopError(message: "请先在“设备连接”安装内置驱动并刷新设备，再进入麦克风模式。")
             }
-            try await self.prepareDisplay(.prompts, reopen: true)
+            try await self.prepareDisplay(.prompts, reopen: true, microphone: true)
             if let content = self.lastPromptContent {
                 _ = try await self.request("/v1/prompts/text", body: content)
             }
@@ -452,6 +689,20 @@ final class DesktopBridge: ObservableObject {
         }
     }
 
+    func prepareNativeRecording() async throws {
+        if assistant.active || assistant.starting || assistant.startingAudio {
+            await assistant.stop(bridge: self)
+        }
+        try await stopCurrent()
+    }
+
+    func playTeleprompterDocument(id: String, title: String, text: String, settings: [String: Any]) async throws {
+        try await prepareNativeRecording()
+        _ = try await request("/v1/teleprompter", body: ["did": id, "title": title, "text": text, "settings": settings])
+        activeSession = .teleprompter
+        notice = "稿件已发送到眼镜。"
+    }
+
     func revealRecording() {
         if let path = recordingPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
     }
@@ -474,6 +725,22 @@ final class DesktopBridge: ObservableObject {
         notice = "API 地址已复制。"
     }
 
+    func copyAgentConfiguration() {
+        guard serviceRunning else { return }
+        let skill = Bundle.main.resourceURL?.appendingPathComponent("AgentSkill/openrayneo-api").path ?? ""
+        let payload: [String: String] = ["OPENRAYNEO_API_URL": apiAddress, "OPENRAYNEO_API_TOKEN": token,
+            "skill_path": skill, "session_rule": "Check device, retain SID/wakeID; use /clear or clear_after_ms to clear without stopping.",
+            "voice_input": "GET /v1/agent/events?after=CURSOR; native wake/exit: GET /v1/assistant/native; PCM: POST /v1/assistant/native/audio with wakeID/after",
+            "voice_result": "Use replyTarget from ASR events: native POST /v1/assistant/native/reply {wakeID,text}; realtime POST /v1/prompts/text {sid,text,translation,final:true}",
+            "records": "POST /v1/records/query {from,to,recordId,text}; POST /v1/records/derived {recordId,sourceRevision,kind,text,tags}; PATCH /v1/records/sync {peerURL,token,enabled:true}"]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(String(decoding: data, as: UTF8.self), forType: .string)
+            notice = "Agent 接入配置已复制，包含本机 API 令牌。"
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func copyAPIExample() {
         guard serviceRunning else { return }
         NSPasteboard.general.clearContents()
@@ -484,7 +751,7 @@ final class DesktopBridge: ObservableObject {
     func checkAPI() {
         perform("正在检查 API…") {
             try await self.verifyAPI()
-            self.notice = "API 健康检查、鉴权和眼镜连接均正常。"
+            self.notice = self.localServicesOnly ? "本机记录 API 健康检查与鉴权正常。" : "API 健康检查、鉴权和眼镜连接均正常。"
         }
     }
 
@@ -493,6 +760,7 @@ final class DesktopBridge: ObservableObject {
         let health = try await request("/health", method: "GET", timeout: 5)
         let device = try await request("/v1/device", method: "GET", timeout: 5)
         guard health["ok"] as? Bool == true else { throw DesktopError(message: "本机 API 健康检查未通过。") }
+        if localServicesOnly { apiVerifiedAt = Date(); return }
         let ble = device["ble"] as? [String: Any] ?? [:]
         connected = device["rfcommConnected"] as? Bool == true && ble["ready"] as? Bool == true
         guard connected else { throw DesktopError(message: "API 可以访问，但眼镜未连接。请重新连接眼镜。") }
@@ -500,7 +768,7 @@ final class DesktopBridge: ObservableObject {
     }
 
     private func perform(_ message: String, action: @escaping @MainActor () async throws -> Void) {
-        guard !busy, !stopping else { return }
+        guard !busy, !stopping, !officialDeviceOperationActive else { return }
         let id = UUID()
         operationID = id
         busy = true
@@ -512,7 +780,7 @@ final class DesktopBridge: ObservableObject {
             catch is CancellationError {
                 if operationID == id {
                     phase = "操作已取消"
-                    notice = "已停止当前操作。已清除的旧配对不会恢复。"
+                    notice = "当前操作已取消。"
                 }
             }
             catch {
@@ -556,6 +824,7 @@ final class DesktopBridge: ObservableObject {
         phase = "已连接"
         if apiVerifiedAt == nil { try await verifyAPI() }
         verifiedPairingAddress = selectedAddress
+        setApplicationRegistrationPending(false, address: selectedAddress)
         notice = "眼镜已连接，本机 API 已就绪。"
     }
 
@@ -581,7 +850,7 @@ final class DesktopBridge: ObservableObject {
         }
     }
 
-    private func prepareDisplay(_ mode: DesktopSession, reopen: Bool) async throws {
+    private func prepareDisplay(_ mode: DesktopSession, reopen: Bool, microphone: Bool = false) async throws {
         try await ensureConnected()
         if activeSession == mode, !reopen { return }
         try await stopCurrent()
@@ -591,7 +860,7 @@ final class DesktopBridge: ObservableObject {
         var body: [String: Any] = ["font_size": font, "content_width": 100, "max_lines": lines]
         if mode == .prompts {
             refreshVirtualAudioDevices()
-            body["microphone_enabled"] = builtInMicrophonesReady
+            body["microphone_enabled"] = microphone && builtInMicrophonesReady
             body["duration"] = microphoneDuration
         }
         let response = try await request(prefix + "/start", body: body)
@@ -611,24 +880,40 @@ final class DesktopBridge: ObservableObject {
         try await Task.sleep(nanoseconds: 500_000_000)
     }
 
-    private func startDefaultPromptIfIdle() async throws {
+    private func restoreDeviceSessionIfNeeded() async throws {
         guard activeSession == nil else { return }
-        try await prepareDisplay(.prompts, reopen: false)
-        notice = microphoneForwarding
-            ? "眼镜已连接，两路麦克风已开启；可以同时发送问题与回答。"
-            : "眼镜已连接，可发送问题与回答。安装内置驱动后，重新打开实时提示即可转送两路麦克风。"
+        await nativeRecording.refresh()
+        if nativeRecording.active {
+            notice = "眼镜正在原生录音，已恢复录音状态。"
+            return
+        }
+        let restored = try await request("/v1/teleprompter/check-state", body: [:], timeout: 12)
+        teleprompterLibrary.ingestPlayback(restored)
+        if restored["running"] as? Bool == true {
+            activeSession = .teleprompter
+            notice = "已恢复眼镜上的提词会话与阅读位置。"
+            return
+        }
+        if restored["previewing"] as? Bool == true {
+            notice = "眼镜正在预览稿件，已恢复稿件状态。"
+            return
+        }
+        notice = "眼镜已连接，Agent API 已就绪。收音与显示按需开启。"
     }
 
     private func stopCurrent() async throws {
         await cancelVideoPlayback()
         guard let current = activeSession else { return }
-        let result = try await request(current.stopPath, body: [:])
+        let result = try await request(current.stopPath, body: current == .nativeAssistant ? ["wakeID": nativeCaptureID as Any? ?? NSNull()] : [:])
         if current == .lifeLog { updateLifeLog(result) }
         else if current.isAudio { updateAudio(result) }
+        else if current == .teleprompter, let state = try? await request("/v1/teleprompter", method: "GET", timeout: 2) {
+            teleprompterLibrary.ingestPlayback(state)
+        }
         activeSession = nil
     }
 
-    private func request(_ path: String, method: String = "POST", body: [String: Any]? = nil, timeout: TimeInterval = 75) async throws -> [String: Any] {
+    func request(_ path: String, method: String = "POST", body: [String: Any]? = nil, timeout: TimeInterval = 75) async throws -> [String: Any] {
         guard !apiAddress.isEmpty else { throw DesktopError(message: "后台服务尚未启动，请先连接眼镜。") }
         var request = URLRequest(url: URL(string: apiAddress + path)!)
         request.httpMethod = method
@@ -646,23 +931,45 @@ final class DesktopBridge: ObservableObject {
         return json
     }
 
-    private func startService() async throws {
+    private func setApplicationRegistrationPending(_ pending: Bool, address: String) {
+        var addresses = Set(UserDefaults.standard.stringArray(forKey: "pendingApplicationRegistrations") ?? [])
+        if pending { addresses.insert(address) } else { addresses.remove(address) }
+        UserDefaults.standard.set(Array(addresses), forKey: "pendingApplicationRegistrations")
+    }
+
+    func startLocalServices() {
+        perform("正在启动本机记录与 Agent 服务…") {
+            try await self.startService(localOnly: true)
+            try await self.verifyAPI()
+            self.phase = "本机记录服务运行中"
+            self.notice = "已启动本机 API，可同步和查询手机记录。连接眼镜时会切换到设备服务。"
+        }
+    }
+
+    private func startService(localOnly: Bool = false) async throws {
         guard service?.isRunning != true else { throw DesktopError(message: "旧连接服务尚未退出，未启动新进程。") }
-        guard !selectedAddress.isEmpty else { throw DesktopError(message: "请先点击“添加并配对眼镜”，或刷新已配对设备列表。") }
+        guard localOnly || !selectedAddress.isEmpty else { throw DesktopError(message: "请先点击“添加并配对眼镜”，或刷新已配对设备列表。") }
         activeSession = nil
         microphoneForwarding = false
         apiVerifiedAt = nil
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         monitor?.cancel()
+        visibilityTask?.cancel(); visibilityTask = nil; visibilityTaskID = UUID()
+        lastSynchronizedGeneration = nil
+        appForeground = NSApp.isActive
         let port = try Self.availablePort()
         let child = Process()
         child.executableURL = Bundle.main.executableURL
-        child.arguments = ["--headless"]
+        child.arguments = localOnly ? ["--headless", "--local-services-only"] : ["--headless"]
+        localServicesOnly = localOnly
         token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         var environment = ProcessInfo.processInfo.environment
         environment["OPENRAYNEO_API_TOKEN"] = token
         environment["OPENRAYNEO_PORT"] = String(port)
         environment["RAYNEO_ADDRESS"] = selectedAddress
+        let registrationPending = UserDefaults.standard.stringArray(forKey: "pendingApplicationRegistrations")?.contains(selectedAddress) == true
+        environment["OPENRAYNEO_CONNECTION_INTENT"] = (registrationPending ? ConnectionIntent.register : .reconnect).rawValue
+        environment["OPENRAYNEO_APP_FOREGROUND"] = appForeground ? "1" : "0"
         child.environment = environment
         child.standardInput = FileHandle.nullDevice
         child.standardOutput = FileHandle.nullDevice
@@ -709,7 +1016,13 @@ final class DesktopBridge: ObservableObject {
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
             guard ready else { throw DesktopError(message: "后台服务启动超时，请重试。") }
-            startMonitoring()
+            if !localOnly {
+                scheduleVisibilitySync()
+                await visibilityTask?.value
+            }
+            guard service === child else { return }
+            guard child.isRunning else { throw DesktopError(message: "连接服务已退出，请重新连接。") }
+            if !localOnly { startMonitoring() }
         } catch {
             let stopped = await BridgeProcessLifecycle.stop(child)
             serviceRunning = !stopped
@@ -724,30 +1037,95 @@ final class DesktopBridge: ObservableObject {
             while !Task.isCancelled, service?.isRunning == true {
                 if let data = try? await request("/v1/device", method: "GET", timeout: 2) {
                     guard !Task.isCancelled else { return }
-                    connected = data["rfcommConnected"] as? Bool == true && (data["ble"] as? [String: Any])?["ready"] as? Bool == true
+                    let deviceConnected = data["rfcommConnected"] as? Bool == true && (data["ble"] as? [String: Any])?["ready"] as? Bool == true
+                    if connected != deviceConnected {
+                        connected = deviceConnected
+                        if deviceConnected { scheduleVisibilitySync() }
+                    }
                     if !connected { apiVerifiedAt = nil }
+                    if let native = data["nativeAssistant"] as? [String: Any] {
+                        let wakeCode = (native["wake"] as? [String: Any])?["rc"] as? Int ?? 0
+                        nativeAssistantActive = native["active"] as? Bool == true && (1...6).contains(wakeCode)
+                        nativeAssistantAudioPackets = native["audioPackets"] as? Int ?? 0
+                        if activeSession == .nativeAssistant, native["capturing"] as? Bool != true { activeSession = nil }
+                        if let id = native["wakeID"] as? String, id != nativeWakeID {
+                            nativeWakeID = id
+                            notice = "眼镜助手已唤醒。可在 Mac 继续交互，或由本机 Agent 接管。"
+                        }
+                    }
                     let ble = data["ble"] as? [String: Any] ?? [:]
                     let rawPhase = ble["phase"] as? String ?? "idle"
                     let names = ["idle": "等待连接", "waitingForBluetooth": "等待系统蓝牙", "scanning": "正在寻找眼镜", "connecting": "正在连接眼镜", "discoveringServices": "正在发现蓝牙服务", "discoveringCharacteristics": "正在准备蓝牙通道", "readingIdentity": "正在核对眼镜身份", "subscribing": "正在准备通知通道", "exchangingDeviceInfo": "正在交换设备信息", "authenticating": "正在认证眼镜", "authenticated": "正在打开数据通道", "failed": "连接失败"]
-                    phase = connected ? "已连接" : ble["bluetoothState"] as? Int == 0 ? "等待系统蓝牙就绪" : names[rawPhase] ?? "连接阶段：\(rawPhase)"
+                    let link = data["dataLink"] as? [String: Any] ?? [:]
+                    let synchronization = data["synchronization"] as? [String: Any] ?? [:]
+                    let syncPhase = synchronization["phase"] as? String ?? "idle"
+                    if connected {
+                        phase = ["queued", "syncing"].contains(syncPhase) ? "已连接，正在恢复状态" : "已连接"
+                    } else {
+                        let phases = ["recovering": "正在恢复连接", "waitingForBLE": "正在恢复 BLE 认证",
+                            "queryingSDP": "正在查询数据通道", "openingSPP": "正在恢复数据通道",
+                            "backoff": "等待重试连接", "waitingToRetry": "眼镜暂不可用，将自动重试",
+                            "suspended": "连接恢复已暂停"]
+                        phase = phases[link["phase"] as? String ?? ""]
+                            ?? (ble["bluetoothState"] as? Int == 0 ? "等待系统蓝牙就绪" : names[rawPhase] ?? "连接阶段：\(rawPhase)")
+                    }
+                    if connected, ["ready", "partial"].contains(syncPhase),
+                       let generation = synchronization["generation"] as? Int, generation != lastSynchronizedGeneration {
+                        lastSynchronizedGeneration = generation
+                        await nativeRecording.refresh()
+                    }
                     if let bytes = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]) { diagnostics = String(decoding: bytes, as: UTF8.self) }
-                } else if !Task.isCancelled { connected = false; apiVerifiedAt = nil; phase = "后台服务暂时无响应" }
-                if activeSession == .lifeLog,
+                } else if !Task.isCancelled {
+                    if connected { connected = false }
+                    apiVerifiedAt = nil; phase = "后台服务暂时无响应"
+                }
+                await ota.refresh()
+                if connected,
                    let state = try? await request("/v1/lifelog", method: "GET", timeout: 2) {
                     guard !Task.isCancelled else { return }
                     updateLifeLog(state)
-                    if state["observing"] as? Bool == false {
+                    if state["observing"] as? Bool == true || state["finalizing"] as? Bool == true {
+                        if activeSession != .lifeLog {
+                            activeSession = .lifeLog
+                            notice = "AlwaysOn 正在采集，可在当前窗口停止。"
+                        }
+                    } else if activeSession == .lifeLog {
                         activeSession = nil
                         notice = "全天智记观察已结束。"
+                        recordingLibrary.refresh()
                     }
                 }
-                if activeSession == .asr || activeSession == .recording || (activeSession == .prompts && microphoneForwarding),
+                if connected,
+                   let display = try? await request("/v1/caption-settings", method: "GET", timeout: 2),
+                   let session = display["session"] as? [String: Any] {
+                    if session["active"] as? Bool == true, session["phase"] as? String == "active" {
+                        if session["business"] as? Int == 0x17, activeSession != .assistantAudio { activeSession = .prompts }
+                        if session["business"] as? Int == 0x13, ![.navigation, .video].contains(activeSession) { activeSession = .captions }
+                    } else if activeSession == .prompts || activeSession == .captions {
+                        activeSession = nil; microphoneForwarding = false
+                    }
+                }
+                if activeSession == .asr || activeSession == .recording || activeSession == .assistantAudio || (activeSession == .prompts && microphoneForwarding),
                    let audio = try? await request("/v1/asr", method: "GET", timeout: 2) {
                     guard !Task.isCancelled else { return }
                     updateAudio(audio)
-                    if audio["running"] as? Bool == false {
+                    if audio["running"] as? Bool == false, audio["stopping"] as? Bool != true {
                         activeSession = nil
                         notice = "音频会话已结束。"
+                    }
+                }
+                if connected,
+                   let state = try? await request("/v1/teleprompter", method: "GET", timeout: 2) {
+                    guard !Task.isCancelled else { return }
+                    teleprompterLibrary.ingestPlayback(state)
+                    if state["running"] as? Bool == true {
+                        if activeSession != .teleprompter {
+                            activeSession = .teleprompter
+                            notice = "眼镜已开始提词播放。"
+                        }
+                    } else if activeSession == .teleprompter {
+                        activeSession = nil
+                        notice = "提词播放已结束，阅读位置已保存在本机。"
                     }
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -774,10 +1152,21 @@ final class DesktopBridge: ObservableObject {
     }
 
     @discardableResult
-    func shutdown() async -> Bool {
+    func shutdown(sendDeviceCommands: Bool = true) async -> Bool {
+        await voiceLab.suspend()
+        assistant.cancelPromptTrial()
+        recordingLibrary.cancel()
+        recordingLibrary.stopPlayback()
+        memoryLibrary.cancelSummary()
+        currentLocationWeather.cancel()
+        if assistant.active || assistant.starting || assistant.startingAudio || assistant.stopping {
+            await assistant.stop(bridge: self)
+        }
         guard !stopping else { return false }
         stopping = true
         defer { stopping = false }
+        // Finish the prior lifecycle send before the final background update.
+        await visibilityTask?.value
         phase = restartingService ? "正在重启连接服务" : "正在停止连接服务"
         pairing.cancel()
         await cancelVideoPlayback()
@@ -791,14 +1180,24 @@ final class DesktopBridge: ObservableObject {
         operation = nil
         monitor = nil
         if let child = service, child.isRunning {
-            if let current = activeSession {
-                if let result = try? await request(current.stopPath, body: [:], timeout: 5) {
-                    if current == .lifeLog { updateLifeLog(result) }
-                    else if current.isAudio { updateAudio(result) }
+            if sendDeviceCommands {
+                await nativeRecording.refresh()
+                if nativeRecording.active { await nativeRecording.command("stop") }
+                if let current = activeSession {
+                    if let result = try? await request(current.stopPath, body: [:], timeout: 5) {
+                        if current == .lifeLog { updateLifeLog(result) }
+                        else if current.isAudio { updateAudio(result) }
+                        else if current == .teleprompter,
+                                let state = try? await request("/v1/teleprompter", method: "GET", timeout: 2) {
+                            teleprompterLibrary.ingestPlayback(state)
+                        }
+                    }
                 }
+                // Also catches a start request completed by the server after client cancellation.
+                if let result = try? await request("/v1/asr/stop", body: [:], timeout: 3) { updateAudio(result) }
+                _ = try? await request("/v1/device/visibility", body: ["isAppForeground": false], timeout: 3)
+                _ = try? await request("/v1/device/recovery/suspend", body: [:], timeout: 3)
             }
-            // Also catches a start request completed by the server after client cancellation.
-            if let result = try? await request("/v1/asr/stop", body: [:], timeout: 3) { updateAudio(result) }
             guard await BridgeProcessLifecycle.stop(child) else {
                 connected = false
                 apiVerifiedAt = nil
@@ -808,6 +1207,7 @@ final class DesktopBridge: ObservableObject {
                 return false
             }
         }
+        teleprompterLibrary.ingestPlayback([:])
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe = nil
         service = nil

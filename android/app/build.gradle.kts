@@ -13,12 +13,13 @@ android {
         applicationId = "com.openrayneo.android"
         minSdk = 33
         targetSdk = 36
-        versionCode = 19
-        versionName = "1.0.0"
+        versionCode = 37
+        versionName = "1.2.0-beta.4"
+        ndk { abiFilters += providers.gradleProperty("openrayneo.abis").orElse("arm64-v8a").get().split(',') }
     }
     buildTypes {
         getByName("release") {
-            // v1.0 retains the existing development certificate for in-place upgrades.
+            // Direct-distribution Beta retains the existing certificate for in-place upgrades.
             signingConfig = signingConfigs.getByName("debug")
             isDebuggable = false
         }
@@ -29,9 +30,19 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
+    androidResources { noCompress += "onnx" }
+    sourceSets.getByName("main").assets.srcDir("../../ThirdParty/SherpaOnnx")
 }
 
+val prepareVoiceModels by tasks.registering(Exec::class) {
+    commandLine("sh", rootProject.file("../scripts/prepare-android-voice.sh"))
+    outputs.files(file("libs/sherpa-onnx-2.0.1.aar"), file("src/main/assets/voice-models/campplus-zh-16k.onnx"),
+        file("src/main/assets/voice-models/silero-vad.onnx"), file("src/main/assets/voice-models/segmentation.int8.onnx"))
+}
+tasks.named("preBuild") { dependsOn(prepareVoiceModels) }
+
 dependencies {
+    implementation(files("libs/sherpa-onnx-2.0.1.aar"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation(platform("androidx.compose:compose-bom:2025.04.01"))
     implementation("androidx.activity:activity-compose:1.10.1")

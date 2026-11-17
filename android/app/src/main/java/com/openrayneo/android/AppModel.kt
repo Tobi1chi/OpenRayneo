@@ -14,10 +14,19 @@ import androidx.lifecycle.AndroidViewModel
 import org.json.JSONObject
 
 internal data class ChatRecord(val question: String, val answer: String)
+internal data class SelectedContact(val name: String, val uri: String)
 
 internal data class CompanionState(
     val available: Boolean = false,
     val glasses: GlassesState = GlassesState(),
+    val conversation: ConversationState = ConversationState(),
+    val deviceSettings: DeviceSettingsState = DeviceSettingsState(),
+    val content: CompanionContentState = CompanionContentState(),
+    val teleprompter: TeleprompterState = TeleprompterState(),
+    val agentServer: AgentServerState = AgentServerState(),
+    val recordSync: AgentServerState = AgentServerState(notice = "相遇同步已关闭"),
+    val phoneEphemeral: Boolean = false,
+    val nativeWakeAvailable: Boolean = false,
     val devices: List<RayneoConnection.Device> = emptyList(),
     val navigationEntries: List<NavigationFeed.Entry> = emptyList(),
     val navigationStatus: String = "在高德开始导航后，回到这里跟随通知",
@@ -54,6 +63,9 @@ internal class AppModel(application: Application) : AndroidViewModel(application
     var config by mutableStateOf(JSONObject())
         private set
 
+    val mobileModelConfigured: Boolean get() = MobileModelEndpoint.isConfigured(
+        config.optString("modelUrl"), config.optString("modelName"), config.optString("modelKey"))
+
     var error by mutableStateOf<String?>(null)
     var notice by mutableStateOf<String?>(null)
     var bluetoothAllowed by mutableStateOf(false)
@@ -79,6 +91,7 @@ internal class AppModel(application: Application) : AndroidViewModel(application
         private set
 
     var phoneDraft by mutableStateOf("")
+    var selectedContact by mutableStateOf<SelectedContact?>(null)
     var computerDraft by mutableStateOf("")
     var phoneHistory by mutableStateOf<List<ChatRecord>>(emptyList())
         private set
@@ -89,6 +102,15 @@ internal class AppModel(application: Application) : AndroidViewModel(application
     // Form drafts survive activity recreation without writing secrets into saved instance state.
     val formDrafts = mutableStateMapOf<String, String>()
     var wantsScan = false
+    private val files = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    fun exportRecording(id: String, uri: android.net.Uri) {
+        val s = service(); val record = s.conversations.repository.records.first { it.id == id }
+        files.execute {
+            val result = runCatching { context.contentResolver.openOutputStream(uri)!!.use { s.conversations.recordings.exportWav(record.audioId ?: id, record.audioSamples, it) } }
+            main.post { result.fold({ notice = "会议音频已导出到所选位置" }, { error = it.message ?: "导出失败" }) }
+        }
+    }
     private val observer: () -> Unit = { refresh() }
     private val connection =
         object : ServiceConnection {
@@ -140,6 +162,14 @@ internal class AppModel(application: Application) : AndroidViewModel(application
             CompanionState(
                 available = true,
                 glasses = s.state,
+                conversation = s.conversations.state,
+                deviceSettings = s.deviceSettings.state,
+                content = s.content.state,
+                teleprompter = s.teleprompter.state,
+                agentServer = s.agentServer.state,
+                recordSync = s.recordSync.state,
+                phoneEphemeral = s.agent.ephemeral,
+                nativeWakeAvailable = s.voiceTransport.nativeActive,
                 devices = s.devices.values.toList(),
                 navigationEntries = s.navigation.entries.values.toList(),
                 navigationStatus = s.navigation.status,
@@ -199,7 +229,7 @@ internal class AppModel(application: Application) : AndroidViewModel(application
         val updated = JSONObject(old.toString())
         values.forEach { (key, value) -> updated.put(key, value.trim()) }
         val mobileChanged =
-            listOf("modelUrl", "modelName", "modelKey").any {
+            listOf("modelUrl", "modelName", "modelKey", "mobileAgentBackend").any {
                 old.optString(it) != updated.optString(it)
             }
         val computerChanged =
@@ -219,19 +249,25 @@ internal class AppModel(application: Application) : AndroidViewModel(application
             computerHistory = emptyList()
         }
         config = updated
+        bridge?.conversations?.configurationChanged()
         resetFormDrafts()
         notice = "配置已加密保存"
     }
 
     private fun resetFormDrafts() {
-        listOf("modelUrl", "modelName", "modelKey", "codexUrl", "codexCwd", "codexToken").forEach {
+        configurationKeys.forEach {
             formDrafts[it] = config.optString(it)
         }
     }
 
     fun importConfig(data: JSONObject) {
-        val keys = listOf("codexUrl", "codexToken", "codexCwd", "modelUrl", "modelName", "modelKey")
+        val keys = configurationKeys
         saveConfig(keys.filter { data.has(it) }.associateWith { data.getString(it) })
+    }
+    companion object {
+        val configurationKeys = listOf("modelUrl", "modelName", "modelKey", "mobileAgentBackend", "localAgentPort", "codexUrl", "codexCwd", "codexToken",
+            "asrKey", "asrUrl", "asrModel", "decisionKey", "decisionUrl", "decisionModel", "nativeAutoAnswer", "audioChannel",
+            "speakerThreshold", "voiceRoutingPrompt", "memoryPrompt", "memoryAutoSummary", "answerClearSeconds", "saveMeetingAudio")
     }
 
     fun send(source: AnswerSource) = attempt {
@@ -241,9 +277,10 @@ internal class AppModel(application: Application) : AndroidViewModel(application
         val old =
             if (mobile) ChatRecord(state.phoneQuestion, state.phoneAnswer)
             else ChatRecord(state.computerQuestion, state.computerAnswer)
+        val oldWasEphemeral = state.phoneEphemeral
         service().submitAnswer(source, text)
         if (mobile) {
-            if (old.question.isNotBlank()) phoneHistory = (phoneHistory + old).takeLast(30)
+            if (old.question.isNotBlank() && !oldWasEphemeral) phoneHistory = (phoneHistory + old).takeLast(30)
             phoneDraft = ""
         } else {
             if (old.question.isNotBlank()) computerHistory = (computerHistory + old).takeLast(30)
@@ -253,7 +290,7 @@ internal class AppModel(application: Application) : AndroidViewModel(application
 
     fun newConversation(source: AnswerSource) = attempt {
         if (source == AnswerSource.MOBILE_AGENT) {
-            service().clearAgent()
+            service().newMobileConversation()
             phoneHistory = emptyList()
         } else {
             service().newCodexConversation()
@@ -284,6 +321,7 @@ internal class AppModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         bridge?.observers?.remove(observer)
         if (bound) context.unbindService(connection)
+        files.shutdown()
         bridge = null
         bound = false
     }

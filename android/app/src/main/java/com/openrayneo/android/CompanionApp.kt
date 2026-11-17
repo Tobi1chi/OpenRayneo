@@ -44,7 +44,7 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
     ) {
         if (route.isNotEmpty())
             route =
-                if (route in listOf("model", "computer", "diagnostics") && !model.onboarding)
+                if (route in listOf("model", "computer", "diagnostics", "voice-settings", "voice-profiles", "device-settings", "content", "teleprompter", "agent-api") && !model.onboarding)
                     "settings"
                 else ""
         else if (model.onboarding) model.step(model.onboardingStep - 1) else tab = 0
@@ -66,7 +66,13 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                                 "model" -> "手机模型"
                                 "computer" -> "电脑连接"
                                 "diagnostics" -> "设备与诊断"
-                                else -> listOf("OpenRayneo", "导航", "助手")[tab]
+                                "voice-settings" -> "语音与提示词"
+                                "voice-profiles" -> "声音与人物"
+                                "device-settings" -> "眼镜设置"
+                                "content" -> "首页与内容"
+                                "teleprompter" -> "提词资料"
+                                "agent-api" -> "DSH Go 与外部 Agent"
+                                else -> listOf("OpenRayneo", "导航", "助手", "记录")[tab]
                             }
                         )
                     },
@@ -104,8 +110,9 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                             Icons.Outlined.Visibility,
                             Icons.Outlined.NearMe,
                             Icons.AutoMirrored.Outlined.Chat,
+                            Icons.Outlined.FolderOpen,
                         )
-                    listOf("眼镜", "导航", "助手").forEachIndexed { index, title ->
+                    listOf("眼镜", "导航", "助手", "记录").forEachIndexed { index, title ->
                         NavigationBarItem(
                             selected = tab == index,
                             onClick = { tab = index },
@@ -146,6 +153,12 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                 "model",
                 "computer" -> ConfigurationScreen(model, route == "model", actions.importConfig)
                 "diagnostics" -> DiagnosticsScreen(model, actions)
+                "voice-settings" -> VoiceSettingsScreen(model, actions)
+                "voice-profiles" -> VoiceProfilesScreen(model)
+                "device-settings" -> GlassesSettingsScreen(model)
+                "content" -> CompanionContentScreen(model)
+                "teleprompter" -> TeleprompterScreen(model)
+                "agent-api" -> AgentServerScreen(model, actions.bluetoothPermission)
                 else ->
                     if (model.onboarding)
                         OnboardingScreen(model, actions, { devices = true }, { route = it })
@@ -157,7 +170,8 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                                         model,
                                         { devices = true },
                                         { tab = it },
-                                        { route = "diagnostics" },
+                                        { route = "device-settings" },
+                                        { route = it },
                                     )
                                 1 ->
                                     NavigationScreen(
@@ -166,7 +180,8 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                                         { sources = true },
                                         { devices = true },
                                     )
-                                else -> AssistantScreen(model, actions, { route = it })
+                                2 -> AssistantScreen(model, actions, { route = it })
+                                else -> ConversationScreen(model, actions, { route = it })
                             }
                         }
             }
@@ -230,6 +245,7 @@ private fun GlassesScreen(
     connect: () -> Unit,
     navigate: (Int) -> Unit,
     diagnostics: () -> Unit,
+    configure: (String) -> Unit,
 ) {
     val state = model.state.glasses
     val linked = state.link.phase == LinkPhase.FULL
@@ -263,6 +279,29 @@ private fun GlassesScreen(
                     }
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (linked || state.link.phase == LinkPhase.BLE_ONLY || busy) {
+                    ToolOutlinedButton(
+                        onClick = { model.attempt { model.service().disconnect() } },
+                        enabled = !state.disconnecting && state.link.phase != LinkPhase.CLOSING,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (state.disconnecting) "正在断开…" else "断开连接")
+                    }
+                    Note("断开会结束显示与收音、停止自动重连，并保留配对记录。随后可切换到其他设备连接。")
+                }
+            }
+        }
+        item {
+            ContentCard {
+                Text("独立伴侣", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolOutlinedButton(onClick = { configure("content") }) { Text("首页与内容") }
+                    ToolOutlinedButton(onClick = { navigate(3) }) { Text("语音记录") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { configure("teleprompter") }) { Text("提词稿库") }
+                    TextButton(onClick = { configure("agent-api") }) { Text("外部Agent") }
+                }
             }
         }
         item { SectionLabel("眼镜画面") }
@@ -279,6 +318,10 @@ private fun GlassesScreen(
                             Text("实时提示")
                         }
                     }
+                    if (state.session?.mode == PageMode.PROMPT && state.session.phase == PagePhase.READY)
+                        TextButton(onClick = { model.attempt { model.service().clearDisplay() } }) {
+                            Text("清空屏幕（保留收音）")
+                        }
                     if (state.intent is DisplayIntent.Answer)
                         TextButton(
                             onClick = { model.attempt { model.service().dismissAnswer() } }

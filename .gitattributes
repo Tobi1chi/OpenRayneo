@@ -1,0 +1,5 @@
+# Preserve packaged PDF bytes and keep them out of text/whitespace diffs.
+*.pdf binary
+
+# The architecture viewer is exported by arch-grower.
+.arch/dashboard.html linguist-generated=true -whitespace
