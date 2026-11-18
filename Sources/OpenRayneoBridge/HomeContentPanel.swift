@@ -130,9 +130,9 @@ struct HomeContentPanel: View {
 
             if component == nil || component == 3 {
 
-            GroupBox { SchedulesPanel(model: schedules, calendarSync: calendarSync) }
+            GroupBox { SchedulesPanel(model: schedules, calendarSync: calendarSync).padding(10) }
                 label: { Label("日程", systemImage: "calendar") }
-            GroupBox { CalendarSyncPanel(model: calendarSync) }
+            GroupBox { CalendarSyncPanel(model: calendarSync).padding(10) }
                 label: { Label("系统日历同步", systemImage: "calendar.badge.clock") }
             }
 

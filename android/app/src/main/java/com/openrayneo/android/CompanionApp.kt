@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.BluetoothSearching
+import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -19,6 +20,8 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -61,7 +64,10 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                 TopAppBar(
                     title = {
                         Text(
-                            when (route) {
+                            style =
+                                if (route.isEmpty()) MaterialTheme.typography.headlineSmall
+                                else MaterialTheme.typography.titleLarge,
+                            text = when (route) {
                                 "settings" -> "设置"
                                 "model" -> "手机模型"
                                 "computer" -> "电脑连接"
@@ -90,7 +96,7 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                     },
                     actions = {
                         if (route.isEmpty()) {
-                            if (s.glasses.link.phase == LinkPhase.FULL) StatusPill("眼镜已连接")
+                            if (s.glasses.link.phase == LinkPhase.FULL && tab != 0) StatusPill("已连接")
                             IconButton(onClick = { route = "settings" }) {
                                 Icon(Icons.Outlined.Settings, "设置")
                             }
@@ -98,13 +104,19 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                     },
                     colors =
                         TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.background
+                            containerColor = tokens.pageBackground,
+                            scrolledContainerColor = tokens.pageBackground,
                         ),
                 )
         },
         bottomBar = {
             if (route.isEmpty() && !model.onboarding && !keyboardVisible)
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                Column {
+                HorizontalDivider(color = tokens.activityBarBorder)
+                NavigationBar(
+                    containerColor = tokens.activityBarBackground,
+                    tonalElevation = 0.dp,
+                ) {
                     val icons =
                         listOf(
                             Icons.Outlined.Visibility,
@@ -118,7 +130,11 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                             onClick = { tab = index },
                             colors =
                                 NavigationBarItemDefaults.colors(
-                                    indicatorColor = Color.Transparent
+                                    indicatorColor = tokens.activityBarActiveBackground,
+                                    selectedIconColor = tokens.activityBarActiveForeground,
+                                    selectedTextColor = tokens.activityBarActiveLabelForeground,
+                                    unselectedIconColor = tokens.activityBarInactiveForeground,
+                                    unselectedTextColor = tokens.activityBarInactiveForeground,
                                 ),
                             icon = {
                                 BadgedBox(
@@ -134,9 +150,10 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                         )
                     }
                 }
+                }
         },
         snackbarHost = { SnackbarHost(snackbars) },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = tokens.pageBackground,
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             when (route) {
@@ -249,12 +266,13 @@ private fun GlassesScreen(
 ) {
     val state = model.state.glasses
     val linked = state.link.phase == LinkPhase.FULL
+    val reachable = linked || state.link.phase == LinkPhase.BLE_ONLY
     val busy =
         state.link.phase in
             setOf(LinkPhase.CONNECTING, LinkPhase.SCANNING, LinkPhase.RETRY_WAIT, LinkPhase.CLOSING)
     LazyColumn(
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
             ContentCard {
@@ -263,23 +281,35 @@ private fun GlassesScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(model.deviceName, style = MaterialTheme.typography.titleMedium)
-                        Note(if (linked) "已连接 · 手机直连" else state.link.detail)
-                    }
-                    ToolOutlinedButton(
-                        onClick =
-                            if (linked || state.link.phase == LinkPhase.BLE_ONLY) diagnostics
-                            else connect
-                    ) {
-                        Text(
-                            if (linked || state.link.phase == LinkPhase.BLE_ONLY) "管理"
-                            else if (busy) "连接进度" else "连接"
-                        )
-                    }
+                    StatusPill(
+                        if (linked) "已连接 · 手机直连"
+                        else if (busy) "正在连接"
+                        else if (reachable) "仅蓝牙低功耗"
+                        else "未连接",
+                        active = linked,
+                    )
+                    if (reachable)
+                        TextButton(onClick = diagnostics) {
+                            Text("管理")
+                            Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp))
+                        }
                 }
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (linked || state.link.phase == LinkPhase.BLE_ONLY || busy) {
+                GlassesArtwork(
+                    Modifier.fillMaxWidth().height(96.dp).padding(horizontal = 16.dp),
+                    live = linked,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(model.deviceName, style = MaterialTheme.typography.headlineSmall)
+                    Note(if (linked) "显示、收音与导航可以随时开启。" else state.link.detail)
+                }
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), strokeCap = StrokeCap.Round)
+                if (!reachable)
+                    ToolButton(onClick = connect, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (busy) "查看连接进度" else "连接眼镜")
+                    }
+                if (reachable || busy) {
                     ToolOutlinedButton(
                         onClick = { model.attempt { model.service().disconnect() } },
                         enabled = !state.disconnecting && state.link.phase != LinkPhase.CLOSING,
@@ -292,58 +322,84 @@ private fun GlassesScreen(
             }
         }
         item {
-            ContentCard {
-                Text("独立伴侣", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToolOutlinedButton(onClick = { configure("content") }) { Text("首页与内容") }
-                    ToolOutlinedButton(onClick = { navigate(3) }) { Text("语音记录") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { configure("teleprompter") }) { Text("提词稿库") }
-                    TextButton(onClick = { configure("agent-api") }) { Text("外部Agent") }
+            val tiles =
+                listOf(
+                    Triple("导航", Icons.Outlined.NearMe) { navigate(1) },
+                    Triple("助手", Icons.AutoMirrored.Outlined.Chat) { navigate(2) },
+                    Triple("语音记录", Icons.Outlined.GraphicEq) { navigate(3) },
+                    Triple("首页与内容", Icons.Outlined.Dashboard) { configure("content") },
+                    Triple("提词稿库", Icons.AutoMirrored.Outlined.Article) { configure("teleprompter") },
+                    Triple("外部 Agent", Icons.Outlined.Hub) { configure("agent-api") },
+                )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                tiles.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        row.forEach { (title, icon, click) ->
+                            FeatureTile(title, icon, Modifier.weight(1f), click)
+                        }
+                    }
                 }
             }
         }
         item { SectionLabel("眼镜画面") }
         item { GlassesOutputPreview(state) }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (linked) {
+        if (linked)
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Note(state.displayDescription)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         ToolOutlinedButton(onClick = { navigate(1) }) { Text("导航") }
                         ToolOutlinedButton(
                             onClick = { model.attempt { model.service().openStandby() } }
                         ) {
                             Text("实时提示")
                         }
+                        if (state.session?.mode == PageMode.PROMPT && state.session.phase == PagePhase.READY)
+                            ToolOutlinedButton(onClick = { model.attempt { model.service().clearDisplay() } }) {
+                                Text("清空屏幕")
+                            }
+                        if (state.intent is DisplayIntent.Answer)
+                            ToolOutlinedButton(onClick = { model.attempt { model.service().dismissAnswer() } }) {
+                                Text("结束眼镜回答")
+                            }
+                        if (state.session != null)
+                            ToolOutlinedButton(onClick = { model.attempt { model.service().pausePrompt() } }) {
+                                Text("暂停显示与收音")
+                            }
                     }
                     if (state.session?.mode == PageMode.PROMPT && state.session.phase == PagePhase.READY)
-                        TextButton(onClick = { model.attempt { model.service().clearDisplay() } }) {
-                            Text("清空屏幕（保留收音）")
-                        }
-                    if (state.intent is DisplayIntent.Answer)
-                        TextButton(
-                            onClick = { model.attempt { model.service().dismissAnswer() } }
-                        ) {
-                            Text("结束眼镜回答")
-                        }
-                    if (state.session != null)
-                        TextButton(onClick = { model.attempt { model.service().pausePrompt() } }) {
-                            Text("暂停显示与收音")
-                        }
+                        Note("清空屏幕会保留收音。")
                 }
             }
-        }
+        item { SectionLabel("眼镜音频") }
         item {
             ContentCard {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    Icon(Icons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.primary)
-                    Column {
-                        Text("眼镜音频", style = MaterialTheme.typography.titleSmall)
+                    val receiving = state.audio.phase == AudioPhase.RECEIVING
+                    Box(
+                        Modifier.size(40.dp).background(
+                            if (receiving) tokens.badgeBackground else tokens.cardIconBackground,
+                            CircleShape,
+                        ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Outlined.GraphicEq,
+                            null,
+                            Modifier.size(20.dp),
+                            tint =
+                                if (receiving) tokens.badgeForeground else tokens.iconForeground,
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("收音状态", style = MaterialTheme.typography.titleSmall)
                         Note(state.audio.detail)
                     }
                 }
@@ -351,35 +407,31 @@ private fun GlassesScreen(
                     val levels = model.state.audioLevels
                     val channels =
                         if (levels.channels == 1) listOf("单声道" to levels.left)
-                        else listOf("声道 1" to levels.left, "声道 2" to levels.right)
+                        else listOf("声道 1 · 本人" to levels.left, "声道 2 · 环境" to levels.right)
                     channels.forEach { (label, rms) ->
-                        Text(label, style = MaterialTheme.typography.labelSmall)
-                        LinearProgressIndicator(
-                            progress = {
-                                ((20 * kotlin.math.log10(rms.coerceAtLeast(.00001)) + 60) / 60)
-                                    .toFloat()
-                                    .coerceIn(0f, 1f)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = tokens.descriptionForeground,
+                            )
+                            LinearProgressIndicator(
+                                progress = {
+                                    ((20 * kotlin.math.log10(rms.coerceAtLeast(.00001)) + 60) / 60)
+                                        .toFloat()
+                                        .coerceIn(0f, 1f)
+                                },
+                                modifier = Modifier.fillMaxWidth().height(6.dp),
+                                color = tokens.progressBarBackground,
+                                trackColor = tokens.progressBarTrack,
+                                strokeCap = StrokeCap.Round,
+                                gapSize = 0.dp,
+                                drawStopIndicator = {},
+                            )
+                        }
                     }
                 }
                 Note("仅在手机计算音量，不保存或上传音频。")
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                FeatureTile("导航", "高德通知", Icons.Outlined.NearMe, Modifier.weight(1f)) {
-                    navigate(1)
-                }
-                FeatureTile(
-                    "助手",
-                    "手机 · 电脑",
-                    Icons.AutoMirrored.Outlined.Chat,
-                    Modifier.weight(1f),
-                ) {
-                    navigate(2)
-                }
             }
         }
     }
@@ -388,21 +440,27 @@ private fun GlassesScreen(
 @Composable
 private fun FeatureTile(
     title: String,
-    subtitle: String,
     icon: ImageVector,
     modifier: Modifier,
     click: () -> Unit,
 ) {
-    Card(
+    Surface(
         onClick = click,
         modifier = modifier,
-        colors =
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = MaterialTheme.shapes.medium,
+        color = tokens.cardBackground,
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Note(subtitle)
+        Column(
+            Modifier.padding(horizontal = 12.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                Modifier.size(36.dp).background(tokens.cardIconBackground, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, Modifier.size(19.dp), tint = tokens.iconForeground)
+            }
+            Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 2)
         }
     }
 }

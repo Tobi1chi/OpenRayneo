@@ -22,6 +22,8 @@ OPENRAYNEO_APP_DIR="$PWD/.build/dev-candidate/OpenRayneoBridge.app" sh scripts/b
 open .build/dev-candidate/OpenRayneoBridge.app
 ```
 
+界面颜色只在 `assets/design-tokens/` 修改（VS Code式语义token：`registry.json` 登记含义，明暗主题JSON给色值），随后运行 `uv run python scripts/generate-design-tokens.py` 重新生成 `DesignTokens.swift` 与 `DesignTokens.kt`；生成文件不手改。
+
 打包使用现有脚本的签名、内嵌库与RPATH流程。读取已有声纹时使用正常签名的App；独立未授权helper可能触发钥匙串提示。分发包通过 `sh scripts/package-release.sh` 生成，发布与上传按相应任务授权执行。
 
 Android需要JDK17、SDK Platform36 / Build-Tools36.0.0；使用 `ANDROID_HOME` 或不提交的 `android/local.properties` 指向本机SDK。

@@ -4,7 +4,12 @@ package com.openrayneo.android
 
 import android.graphics.Paint
 import android.graphics.Typeface
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +31,7 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 internal fun NavigationGrid(frame: String, modifier: Modifier = Modifier) {
+    val glyph = tokens.hudForeground
     val paint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = Typeface.create("sans-serif", Typeface.NORMAL)
@@ -40,14 +46,14 @@ internal fun NavigationGrid(frame: String, modifier: Modifier = Modifier) {
     ) {
         val cellWidth = size.width / 20
         val cellHeight = size.height / 5
-        paint.color = SignalGreen.toArgb()
+        paint.color = glyph.toArgb()
         paint.textSize = cellWidth * .95f
         val baselineOffset = -(paint.ascent() + paint.descent()) / 2
         frame.split('\n').forEachIndexed { row, text ->
             text.forEachIndexed { column, character ->
                 if (character == '█') {
                     drawRect(
-                        SignalGreen,
+                        glyph,
                         Offset(column * cellWidth, row * cellHeight),
                         Size(cellWidth, cellHeight),
                     )
@@ -67,13 +73,14 @@ internal fun NavigationGrid(frame: String, modifier: Modifier = Modifier) {
 @Composable
 internal fun GridPreview(frame: String, label: String) {
     Surface(
-        color = LensBlack,
-        contentColor = SignalGreen,
-        shape = MaterialTheme.shapes.medium,
+        color = tokens.hudBackground,
+        contentColor = tokens.hudForeground,
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, tokens.hudBorder),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium)
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            LensHeader(label, live = false)
             NavigationGrid(frame)
         }
     }
@@ -100,13 +107,14 @@ internal fun GlassesOutputPreview(state: GlassesState) {
             else -> "实时提示 · 已写出内容"
         }
     Surface(
-        color = LensBlack,
-        contentColor = SignalGreen,
-        shape = MaterialTheme.shapes.medium,
+        color = tokens.hudBackground,
+        contentColor = tokens.hudForeground,
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, tokens.hudBorder),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(title, style = MaterialTheme.typography.labelMedium)
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LensHeader(title, live = available)
             if (available) {
                 if (session.mode == PageMode.NAVIGATION) NavigationGrid(content.text)
                 else
@@ -115,7 +123,7 @@ internal fun GlassesOutputPreview(state: GlassesState) {
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text(content.text, style = MaterialTheme.typography.titleMedium)
-                        HorizontalDivider(color = SignalGreen.copy(alpha = .2f))
+                        HorizontalDivider(color = tokens.hudDivider)
                         Text(content.answer.orEmpty(), style = MaterialTheme.typography.bodyLarge)
                     }
             } else {
@@ -126,11 +134,27 @@ internal fun GlassesOutputPreview(state: GlassesState) {
                         session != null -> state.displayDescription
                         else -> "选择导航或打开实时提示。"
                     },
-                    Modifier.padding(vertical = 20.dp),
-                    style = MaterialTheme.typography.bodyMedium,
+                    Modifier.padding(vertical = 18.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = tokens.hudSecondaryForeground,
                 )
             }
         }
     }
-    Note("发送记录预览，非实时屏幕截图。", Modifier.padding(top = 8.dp))
+    Note("发送记录预览，非实时屏幕截图。", Modifier.padding(start = 4.dp, top = 8.dp))
+}
+
+@Composable
+private fun LensHeader(text: String, live: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier.size(6.dp)
+                .background(if (live) tokens.hudForeground else tokens.hudIndicatorInactive, CircleShape)
+        )
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.6.sp),
+            color = tokens.hudDescriptionForeground,
+        )
+    }
 }

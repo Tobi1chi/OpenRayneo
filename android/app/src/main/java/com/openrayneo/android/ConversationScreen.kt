@@ -13,6 +13,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -92,12 +97,21 @@ internal fun ConversationScreen(model: AppModel, actions: UiActions, open: (Stri
                 FilterChip(monthly, { monthly = true }, label = { Text("按月") })
                 TextButton(onClick = { dateText = LocalDate.now().toString() }) { Text("今天") }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { dateText = (if (monthly) date.minusMonths(1) else date.minusDays(1)).toString() }) { Text("上一${if (monthly) "月" else "天"}") }
-                Text(if (monthly) "${date.year}年${date.monthValue}月" else "${date.monthValue}月${date.dayOfMonth}日")
-                TextButton(onClick = { dateText = (if (monthly) date.plusMonths(1) else date.plusDays(1)).toString() }) { Text("下一${if (monthly) "月" else "天"}") }
+            Surface(Modifier.fillMaxWidth().padding(top = 10.dp), shape = MaterialTheme.shapes.large,
+                color = tokens.cardBackground) {
+                Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { dateText = (if (monthly) date.minusMonths(1) else date.minusDays(1)).toString() }) {
+                        Icon(Icons.Outlined.ChevronLeft, "上一${if (monthly) "月" else "天"}")
+                    }
+                    Text(if (monthly) "${date.year}年${date.monthValue}月" else "${date.monthValue}月${date.dayOfMonth}日",
+                        Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    IconButton(onClick = { dateText = (if (monthly) date.plusMonths(1) else date.plusDays(1)).toString() }) {
+                        Icon(Icons.Outlined.ChevronRight, "下一${if (monthly) "月" else "天"}")
+                    }
+                }
             }
-            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("搜索本时段原话、人物或记忆") }, singleLine = true)
+            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(top = 10.dp), label = { Text("搜索本时段原话、人物或记忆") }, singleLine = true,
+                shape = MaterialTheme.shapes.medium, leadingIcon = { Icon(Icons.Outlined.Search, null) })
         }
         val begin = (if (monthly) date.withDayOfMonth(1) else date).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val end = (if (monthly) date.withDayOfMonth(1).plusMonths(1) else date.plusDays(1)).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()

@@ -9,14 +9,18 @@ struct AgentWorkspacePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("让 Agent 看见、听见，并把结果送到眼前。")
-                .font(.title3.weight(.medium))
-            Text("连接眼镜后，本机 Agent 可以通过带令牌的 HTTP API 控制显示、收音、待办和设备设置。收音按需开启，断开连接会停止服务。")
-                .foregroundStyle(.secondary)
-            HStack(spacing: 16) {
-                status("眼镜", value: bridge.connected ? "已连接" : "等待连接", icon: "eyeglasses")
-                status("本机 API", value: bridge.apiReady ? "可用" : "未就绪", icon: "terminal")
-                status("当前会话", value: bridge.activeSession?.title ?? "空闲", icon: "rectangle.on.rectangle")
+            LensSurface(title: "OPENRAYNEO · LOCAL AGENT", live: bridge.connected) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("让 Agent 看见、听见，并把结果送到眼前。")
+                        .font(.system(size: 22, weight: .semibold)).tracking(-0.2)
+                    Text("连接眼镜后，本机 Agent 可以通过带令牌的 HTTP API 控制显示、收音、待办和设备设置。收音按需开启，断开连接会停止服务。")
+                        .font(.callout).foregroundStyle(Token.hudSecondaryForeground).fixedSize(horizontal: false, vertical: true)
+                }.padding(.vertical, 6)
+            }
+            HStack(spacing: 14) {
+                status("眼镜", value: bridge.connected ? "已连接" : "等待连接", icon: "eyeglasses", live: bridge.connected)
+                status("本机 API", value: bridge.apiReady ? "可用" : "未就绪", icon: "terminal", live: bridge.apiReady)
+                status("当前会话", value: bridge.activeSession?.title ?? "空闲", icon: "rectangle.on.rectangle", live: bridge.activeSession != nil)
             }
             GroupBox("接入你的 Agent") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -67,11 +71,14 @@ struct AgentWorkspacePanel: View {
         }
     }
 
-    private func status(_ title: String, value: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.headline)
-        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+    private func status(_ title: String, value: String, icon: String, live: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(title, systemImage: icon).font(.system(size: 12)).foregroundStyle(.secondary)
+                Spacer()
+                SignalDot(active: live, size: 6)
+            }
+            Text(value).font(.system(size: 17, weight: .semibold))
+        }.card(padding: 16)
     }
 }

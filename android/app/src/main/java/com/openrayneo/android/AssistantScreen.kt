@@ -61,13 +61,24 @@ internal fun AssistantScreen(model: AppModel, actions: UiActions, configure: (St
         SingleChoiceSegmentedButtonRow(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
+            val segmentColors =
+                SegmentedButtonDefaults.colors(
+                    activeContainerColor = tokens.tabActiveBackground,
+                    activeContentColor = tokens.tabActiveForeground,
+                    activeBorderColor = tokens.tabBorder,
+                    inactiveContainerColor = tokens.tabInactiveBackground,
+                    inactiveContentColor = tokens.foreground,
+                    inactiveBorderColor = tokens.tabBorder,
+                )
             SegmentedButton(
                 mobile,
                 { mobile = true },
                 androidx.compose.foundation.shape.RoundedCornerShape(
-                    topStart = 8.dp,
-                    bottomStart = 8.dp,
+                    topStart = 10.dp,
+                    bottomStart = 10.dp,
                 ),
+                colors = segmentColors,
+                icon = {},
             ) {
                 Text(if (s.phoneRunning) "本机 Agent · 处理中" else "本机 Agent")
             }
@@ -75,9 +86,11 @@ internal fun AssistantScreen(model: AppModel, actions: UiActions, configure: (St
                 !mobile,
                 { mobile = false },
                 androidx.compose.foundation.shape.RoundedCornerShape(
-                    topEnd = 8.dp,
-                    bottomEnd = 8.dp,
+                    topEnd = 10.dp,
+                    bottomEnd = 10.dp,
                 ),
+                colors = segmentColors,
+                icon = {},
             ) {
                 Text(
                     if (s.approvals.isNotEmpty()) "电脑 · 待回复"

@@ -65,25 +65,16 @@ private struct DesktopControlView: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-            Divider()
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(page.rawValue).font(.title2.weight(.semibold))
-                        Text(page == .officialAccount ? "管理雷鸟官方会话和云端设备" : page == .feedback ? "向官方反馈问题，管理本地草稿与附件" : page == .workspace ? "本机服务 · 按需收音 · Agent 控制" : bridge.activeSession.map { "当前功能：\($0.title)" } ?? "准备好后发送到眼镜")
-                            .font(.callout).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if bridge.activeSession != nil {
-                        Button("结束当前功能", systemImage: "stop.fill") { bridge.stopSession() }.disabled(unavailable)
-                    }
-                }
+            Rectangle().fill(Token.sideBarBorder).frame(width: 1)
+            VStack(alignment: .leading, spacing: 0) {
+                header.padding(.horizontal, 36).padding(.top, 34).padding(.bottom, 18)
                 if let error = bridge.errorMessage {
-                    HStack(alignment: .top) {
-                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Token.bannerWarningForeground)
                         Text(error).textSelection(.enabled).font(.callout)
-                    }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    }.padding(.horizontal, 14).padding(.vertical, 11).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Token.bannerWarningBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.horizontal, 36).padding(.bottom, 14)
                 }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
@@ -125,16 +116,21 @@ private struct DesktopControlView: View {
                         case .assistant: AssistantPanel(model: bridge.assistant, bridge: bridge)
                         }
                         if page == .setup { connectionHelp }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxWidth: 960, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 36).padding(.bottom, 32)
                 }
-                Divider()
-                HStack {
+                HStack(spacing: 8) {
                     if bridge.busy || bridge.stopping { ProgressView().controlSize(.small) }
-                    Text(bridge.notice).font(.callout).foregroundStyle(.secondary)
+                    Text(bridge.notice).font(.system(size: 12)).foregroundStyle(Token.statusBarForeground).lineLimit(2).help(bridge.notice).textSelection(.enabled)
                     Spacer()
-                }.frame(minHeight: 24)
-            }.padding(24)
-        }.frame(minWidth: 900, minHeight: 630)
+                }.padding(.horizontal, 36).padding(.vertical, 8).frame(minHeight: 34)
+                    .background(Token.statusBarBackground)
+                    .overlay(alignment: .top) { Rectangle().fill(Token.statusBarBorder).frame(height: 1) }
+            }.background(Token.pageBackground)
+        }.frame(minWidth: 960, minHeight: 640)
+        .groupBoxStyle(PanelGroupBoxStyle())
+        .tint(Token.buttonBackground)
+        .ignoresSafeArea(.container, edges: .top)
         .onChange(of: bridge.nativeWakeID) { id in
             guard id != nil, bridge.nativeAssistantActive else { return }
             page = .assistant
@@ -144,70 +140,114 @@ private struct DesktopControlView: View {
         }
     }
 
-    private var sidebar: some View {
-        ScrollView { sidebarContent }
-            .frame(width: 240).frame(maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private var sidebarContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("OpenRayneo", systemImage: "eyeglasses").font(.title3.weight(.semibold))
-                Spacer()
-                Text("Beta 1").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-            }
-            HStack(spacing: 7) {
-                Circle().fill(bridge.connected ? Color.green : Color.secondary.opacity(0.45)).frame(width: 7, height: 7)
-                Text(bridge.phase).font(.callout)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text(bridge.refreshingDevices ? "正在读取已配对设备…" : "已配对眼镜").font(.caption).foregroundStyle(.secondary)
-                Picker("眼镜", selection: $bridge.selectedAddress) {
-                    if bridge.devices.isEmpty { Text("尚未找到眼镜").tag("") }
-                    ForEach(bridge.devices) { Text("\($0.name) · \($0.id.suffix(5))").tag($0.id) }
-                }.labelsHidden().disabled(bridge.serviceRunning || unavailable)
-                HStack {
-                    Button("刷新", systemImage: "arrow.clockwise") { bridge.refreshDevices() }
-                        .disabled(bridge.serviceRunning || bridge.refreshingDevices || unavailable)
-                    Button("蓝牙设置") { bridge.openBluetoothSettings() }
-                }.controlSize(.small)
-                Button("添加并配对眼镜") { page = .setup; bridge.pairAndConnect() }
-                    .disabled(unavailable || bridge.refreshingDevices)
-                if bridge.serviceRunning {
-                    if !bridge.connected {
-                        Button("重新连接") { bridge.connect() }.disabled(unavailable)
-                    }
-                    Button(bridge.stopping ? "正在断开…" : "断开连接") { bridge.disconnect() }
-                        .disabled(bridge.stopping || bridge.officialDeviceOperationActive)
-                } else {
-                    Button("连接眼镜") { bridge.connect() }
-                        .buttonStyle(.borderedProminent).disabled(bridge.selectedAddress.isEmpty || unavailable)
-                }
-            }
-            Button(bridge.activeSession == .prompts ? "重新进入麦克风模式" : "进入麦克风模式", systemImage: "mic") {
-                bridge.enterMicrophoneMode()
-            }.disabled(unavailable || bridge.selectedAddress.isEmpty)
-            if bridge.microphoneForwarding {
-                Label(bridge.microphoneRecovering ? "麦克风正在恢复" : bridge.microphoneAudioState == "waiting" ? "等待眼镜音频" : "两路麦克风已开启", systemImage: "mic.fill").font(.caption)
-                Text(String(format: "已接收 %.1f 秒音频", bridge.audioSeconds))
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-            }
-            Divider()
-            ForEach(["工作台", "眼镜", "内容", "进阶工具"], id: \.self) { group in
-                Text(group).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ForEach(pages(in: group)) { item in
-                Button { page = item } label: {
-                    Label(item.rawValue, systemImage: item.icon)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 5).padding(.horizontal, 10)
-                        .background(page == item ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 7))
-                }.buttonStyle(.plain)
-                }
+    private var header: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(page.rawValue).font(.system(size: 26, weight: .semibold)).tracking(-0.3)
+                Text(page == .officialAccount ? "管理雷鸟官方会话和云端设备" : page == .feedback ? "向官方反馈问题，管理本地草稿与附件" : page == .workspace ? "本机服务 · 按需收音 · Agent 控制" : bridge.activeSession.map { "当前功能：\($0.title)" } ?? "准备好后发送到眼镜")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
             }
             Spacer()
+            if let session = bridge.activeSession {
+                StatusChip(text: session.title)
+                Button("结束当前功能", systemImage: "stop.fill") { bridge.stopSession() }.disabled(unavailable)
+            }
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                BrandMark(size: 28)
+                Text("OpenRayneo").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text("BETA").font(.system(size: 9.5, weight: .bold)).tracking(0.8).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 3).overlay(Capsule().strokeBorder(Token.widgetBorder))
+            }.padding(.horizontal, 18).padding(.top, 46).padding(.bottom, 16)
+            deviceCard.padding(.horizontal, 12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(["工作台", "眼镜", "内容", "进阶工具"], id: \.self) { group in
+                        Text(group).font(.system(size: 11, weight: .semibold)).foregroundStyle(Token.sideBarSectionHeaderForeground)
+                            .padding(.horizontal, 10).padding(.top, 14).padding(.bottom, 4)
+                        ForEach(pages(in: group)) { navItem($0) }
+                    }
+                }.padding(.horizontal, 12).padding(.bottom, 12)
+            }
             Text("手机占用连接时，请先关闭手机蓝牙。")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                .font(.system(size: 11)).foregroundStyle(Token.sideBarSectionHeaderForeground).fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 22).padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .top) { Rectangle().fill(Token.sideBarBorder).frame(height: 1) }
+        }.frame(width: 256).frame(maxHeight: .infinity).background(Token.sideBarBackground)
+    }
+
+    private var deviceCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                SignalDot(active: bridge.connected)
+                Text(bridge.phase).font(.system(size: 12.5, weight: .medium)).lineLimit(2).help(bridge.phase)
+                Spacer(minLength: 4)
+                Menu {
+                    Button("刷新已配对设备", systemImage: "arrow.clockwise") { bridge.refreshDevices() }
+                        .disabled(bridge.serviceRunning || bridge.refreshingDevices || unavailable)
+                    Button("添加并配对眼镜", systemImage: "plus") { page = .setup; bridge.pairAndConnect() }
+                        .disabled(unavailable || bridge.refreshingDevices)
+                    Divider()
+                    Button("打开蓝牙设置") { bridge.openBluetoothSettings() }
+                } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().foregroundStyle(.secondary)
+                    .help("更多操作").accessibilityLabel("更多操作")
+            }
+            Picker("眼镜", selection: $bridge.selectedAddress) {
+                if bridge.devices.isEmpty { Text(bridge.refreshingDevices ? "正在读取已配对设备…" : "尚未找到眼镜").tag("") }
+                ForEach(bridge.devices) { Text("\($0.name) · \($0.id.suffix(5))").tag($0.id) }
+            }.labelsHidden().disabled(bridge.serviceRunning || unavailable)
+            if bridge.serviceRunning {
+                if !bridge.connected {
+                    Button { bridge.connect() } label: {
+                        Label { Text("重新连接") } icon: { Image(systemName: "arrow.triangle.2.circlepath").fontWeight(.medium) }.frame(maxWidth: .infinity)
+                    }.buttonStyle(.borderedProminent).controlSize(.large).disabled(unavailable)
+                }
+                Button { bridge.disconnect() } label: {
+                    Text(bridge.stopping ? "正在断开…" : "断开连接").frame(maxWidth: .infinity)
+                }.controlSize(.large).disabled(bridge.stopping || bridge.officialDeviceOperationActive)
+            } else {
+                Button { bridge.connect() } label: {
+                    Label { Text("连接眼镜") } icon: { GlassesGlyph() }.frame(maxWidth: .infinity)
+                }.buttonStyle(.borderedProminent).controlSize(.large)
+                    .disabled(bridge.selectedAddress.isEmpty || unavailable)
+            }
+            Button { bridge.enterMicrophoneMode() } label: {
+                Label(bridge.activeSession == .prompts ? "重新进入麦克风模式" : "进入麦克风模式", systemImage: "mic").frame(maxWidth: .infinity)
+            }.disabled(unavailable || bridge.selectedAddress.isEmpty)
+            if bridge.microphoneForwarding {
+                HStack(spacing: 6) {
+                    Image(systemName: "mic.fill").foregroundStyle(Token.statusIndicatorActive)
+                    Text(bridge.microphoneRecovering ? "麦克风正在恢复" : bridge.microphoneAudioState == "waiting" ? "等待眼镜音频" : "两路麦克风已开启")
+                    Spacer()
+                    Text(String(format: "%.1f 秒", bridge.audioSeconds)).monospacedDigit().foregroundStyle(.secondary)
+                }.font(.system(size: 11.5))
+            }
+        }.card(padding: 12)
+    }
+
+    private func navItem(_ item: ControlPage) -> some View {
+        let selected = page == item
+        return Button { page = item } label: {
+            HStack(spacing: 10) {
+                Image(systemName: item.icon).font(.system(size: 13, weight: .medium)).frame(width: 18)
+                    .foregroundStyle(selected ? Token.listActiveSelectionIconForeground : Token.iconForeground)
+                Text(item.rawValue).font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Token.listActiveSelectionForeground : Token.listInactiveForeground)
+                Spacer()
+            }.padding(.vertical, 6.5).padding(.horizontal, 10)
+                .background(selected ? Token.listActiveSelectionBackground : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(alignment: .leading) {
+                    if selected { Capsule().fill(Token.listActiveSelectionIndicator).frame(width: 3, height: 14).offset(x: -1.5) }
+                }
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain)
     }
 
     private func pages(in group: String) -> [ControlPage] {
@@ -220,72 +260,79 @@ private struct DesktopControlView: View {
     }
 
     private var setupPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            setupStep(number: 1, title: "发现并配对", complete: bridge.verifiedPairingAddress == bridge.selectedAddress,
-                      detail: bridge.selectedDevice.map { "已选择 \($0.name)" } ?? "让眼镜进入配对模式，点击下方按钮发现并配对。")
-            HStack {
-                Button("添加并配对眼镜", systemImage: "plus") { bridge.pairAndConnect() }
-                    .disabled(unavailable || bridge.refreshingDevices)
-                Text("已有配对可保留使用；需要修复时可明确选择重新配对。").font(.caption).foregroundStyle(.secondary)
-            }
-            if bridge.pairingActive {
-                Text("请保持眼镜开机、手机蓝牙关闭。开始后不要同时忽略 Mac 配对或重新进入眼镜配对模式；如弹出数字，请核对。")
-                    .font(.callout).foregroundStyle(.secondary)
-                HStack {
-                    Button("取消配对流程") { bridge.cancelPairing() }
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 14) {
+                setupStep(number: 1, title: "发现并配对", complete: bridge.verifiedPairingAddress == bridge.selectedAddress,
+                          detail: bridge.selectedDevice.map { "已选择 \($0.name)" } ?? "让眼镜进入配对模式，点击下方按钮发现并配对。")
+                HStack(spacing: 12) {
+                    Button("添加并配对眼镜", systemImage: "plus") { bridge.pairAndConnect() }
+                        .disabled(unavailable || bridge.refreshingDevices)
+                    Text("已有配对可保留使用；需要修复时可明确选择重新配对。").font(.caption).foregroundStyle(.secondary)
+                }.padding(.leading, 40)
+                if bridge.pairingActive {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("请保持眼镜开机、手机蓝牙关闭。开始后不要同时忽略 Mac 配对或重新进入眼镜配对模式；如弹出数字，请核对。")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Button("取消配对流程") { bridge.cancelPairing() }
+                    }.padding(.leading, 40)
                 }
-            }
-            Divider()
-            setupStep(number: 2, title: "连接眼镜", complete: bridge.connected,
-                      detail: bridge.connected ? "蓝牙认证与数据通道已建立。" : "已配对的眼镜可直接连接；后台服务和鉴权令牌会自动准备。")
-            Button(bridge.connected ? "已连接" : "连接并启用 API", systemImage: "bolt.horizontal") { bridge.connect() }
-                .buttonStyle(.borderedProminent).disabled(bridge.connected || bridge.selectedAddress.isEmpty || unavailable)
-            Button(bridge.restartingService ? "正在重启连接服务…" : "重启连接服务", systemImage: "arrow.clockwise") {
-                bridge.restartConnectionService()
-            }
-            .disabled(bridge.selectedAddress.isEmpty || bridge.stopping || bridge.restartingService || bridge.pairingActive || bridge.refreshingDevices || bridge.officialDeviceOperationActive)
-            Text("连接卡住时可重启服务，窗口保持打开、系统配对保留。当前显示或录音会话会结束，API 地址和令牌可能更新。")
-                .font(.caption).foregroundStyle(.secondary)
-            Divider()
-            microphoneSettings
-            Divider()
-            setupStep(number: 3, title: "本机 API", complete: bridge.apiReady,
-                      detail: bridge.apiReady ? "健康检查和带令牌的设备查询已通过。" : bridge.serviceRunning ? "服务已启动，正在等待眼镜连接或 API 检查。" : "连接完成后，即可复制地址与调用命令。")
-            if bridge.serviceRunning {
-                Text(bridge.apiAddress).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                HStack {
-                    Button("复制地址") { bridge.copyAPIAddress() }
-                    Button("复制令牌") { bridge.copyAPIToken() }
-                    Button("检查 API") { bridge.checkAPI() }.disabled(unavailable)
-                }
-                Text(bridge.apiExample).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
-                Button("复制带令牌的调用示例", systemImage: "doc.on.doc") { bridge.copyAPIExample() }
-                if let verified = bridge.apiVerifiedAt {
-                    Text("最近检查：\(verified.formatted(date: .omitted, time: .standard))").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Text("API 仅供这台 Mac 调用。断开或退出后服务停止；再次连接时请以当前地址和令牌为准。")
-                .font(.caption).foregroundStyle(.secondary)
+            }.card()
+            VStack(alignment: .leading, spacing: 14) {
+                setupStep(number: 2, title: "连接眼镜", complete: bridge.connected,
+                          detail: bridge.connected ? "蓝牙认证与数据通道已建立。" : "已配对的眼镜可直接连接；后台服务和鉴权令牌会自动准备。")
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Button { bridge.connect() } label: { Label { Text(bridge.connected ? "已连接" : "连接并启用 API") } icon: { GlassesGlyph() } }
+                            .buttonStyle(.borderedProminent).disabled(bridge.connected || bridge.selectedAddress.isEmpty || unavailable)
+                        Button(bridge.restartingService ? "正在重启连接服务…" : "重启连接服务", systemImage: "arrow.clockwise") {
+                            bridge.restartConnectionService()
+                        }
+                        .disabled(bridge.selectedAddress.isEmpty || bridge.stopping || bridge.restartingService || bridge.pairingActive || bridge.refreshingDevices || bridge.officialDeviceOperationActive)
+                    }.controlSize(.large)
+                    Text("连接卡住时可重启服务，窗口保持打开、系统配对保留。当前显示或录音会话会结束，API 地址和令牌可能更新。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(.leading, 40)
+            }.card()
+            VStack(alignment: .leading, spacing: 14) {
+                setupStep(number: 3, title: "本机 API", complete: bridge.apiReady,
+                          detail: bridge.apiReady ? "健康检查和带令牌的设备查询已通过。" : bridge.serviceRunning ? "服务已启动，正在等待眼镜连接或 API 检查。" : "连接完成后，即可复制地址与调用命令。")
+                VStack(alignment: .leading, spacing: 10) {
+                    if bridge.serviceRunning {
+                        Text(bridge.apiAddress).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                        HStack {
+                            Button("复制地址") { bridge.copyAPIAddress() }
+                            Button("复制令牌") { bridge.copyAPIToken() }
+                            Button("检查 API") { bridge.checkAPI() }.disabled(unavailable)
+                        }
+                        Text(bridge.apiExample).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Token.textCodeBlockBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        Button("复制带令牌的调用示例", systemImage: "doc.on.doc") { bridge.copyAPIExample() }
+                        if let verified = bridge.apiVerifiedAt {
+                            Text("最近检查：\(verified.formatted(date: .omitted, time: .standard))").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("API 仅供这台 Mac 调用。断开或退出后服务停止；再次连接时请以当前地址和令牌为准。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(.leading, 40)
+            }.card()
+            microphoneSettings.card()
         }
     }
 
     private func setupStep(number: Int, title: String, complete: Bool, detail: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: complete ? "checkmark.circle.fill" : "\(number).circle")
-                .font(.title2).foregroundStyle(complete ? Color.green : Color.secondary)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.headline)
+            StepBadge(number: number, complete: complete)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 15, weight: .semibold))
                 Text(detail).foregroundStyle(.secondary).font(.callout)
-            }
+            }.padding(.top, 4)
         }
     }
 
     private var navigationPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("极简字符导航").font(.headline)
-            Text("模拟转向和距离，尚未接入地图或 GPS。").foregroundStyle(.secondary)
+            SectionTitle("极简字符导航", detail: "模拟转向和距离，尚未接入地图或 GPS。")
             HStack(spacing: 24) {
                 Picker("方向", selection: $direction) {
                     ForEach(NavigationDirection.allCases) { Text($0.title).tag($0) }
@@ -295,50 +342,56 @@ private struct DesktopControlView: View {
                 }
             }
             let cells = NavigationFrame.rows(direction: direction, meters: meters).flatMap { Array($0) }
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(16), spacing: 0), count: 20), spacing: 0) {
-                ForEach(cells.indices, id: \.self) { index in
-                    Text(String(cells[index])).font(.system(size: 16, weight: .regular, design: .monospaced)).frame(width: 16, height: 20)
-                }
-            }.padding(20).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
-            Text("20×5 排版预览，实际字体以眼镜为准。").font(.caption).foregroundStyle(.secondary)
+            LensSurface(title: "20×5 排版预览 · 实际字体以眼镜为准") {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(16), spacing: 0), count: 20), spacing: 0) {
+                    ForEach(cells.indices, id: \.self) { index in
+                        Text(String(cells[index])).font(.system(size: 16, weight: .regular, design: .monospaced)).frame(width: 16, height: 20)
+                    }
+                }.fixedSize()
+            }
             HStack {
                 Button(bridge.activeSession == .navigation ? "更新导航" : "显示导航", systemImage: "paperplane") {
                     bridge.showNavigation(direction: direction, meters: meters)
                 }.buttonStyle(.borderedProminent)
                 Button("重新打开显示") { bridge.showNavigation(direction: direction, meters: meters, reopen: true) }
-            }.disabled(unavailable || bridge.selectedAddress.isEmpty)
-            Text("首行自动对齐：首次显示不修正，后续刷新自动修正。").font(.caption).foregroundStyle(.secondary)
-            Text("在眼镜上手动退出后，使用“重新打开显示”。").font(.caption).foregroundStyle(.secondary)
-        }
+            }.controlSize(.large).disabled(unavailable || bridge.selectedAddress.isEmpty)
+            Text("首行自动对齐：首次显示不修正，后续刷新自动修正。在眼镜上手动退出后，使用“重新打开显示”。").font(.caption).foregroundStyle(.secondary)
+        }.card()
     }
 
     private var textPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             Picker("显示页面", selection: $usePrompt) {
                 Text("实时字幕").tag(false)
                 Text("实时提示").tag(true)
-            }.pickerStyle(.segmented).frame(maxWidth: 340)
-            Text(usePrompt ? "提示标题" : "显示文字").font(.headline)
-            editor($caption, height: usePrompt ? 80 : 170)
-            if usePrompt {
-                Text("回答正文").font(.headline)
-                editor($answer, height: 120)
-                Text("文字显示不主动开启收音；已进入麦克风模式时，更新回答会保留音频。").font(.caption).foregroundStyle(.secondary)
-            }
-            Toggle("作为完整结果发送（final）", isOn: $finalText)
-            Text("完整结果用于结束当前识别片段；清屏请使用下方独立操作。")
-                .font(.caption).foregroundStyle(.secondary)
+            }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 280)
+            VStack(alignment: .leading, spacing: 14) {
+                fieldLabel(usePrompt ? "提示标题" : "显示文字")
+                editor($caption, height: usePrompt ? 80 : 170)
+                if usePrompt {
+                    fieldLabel("回答正文")
+                    editor($answer, height: 120)
+                    Text("文字显示不主动开启收音；已进入麦克风模式时，更新回答会保留音频。").font(.caption).foregroundStyle(.secondary)
+                }
+                Divider().padding(.vertical, 2)
+                Toggle("作为完整结果发送（final）", isOn: $finalText)
+                Text("完整结果用于结束当前识别片段；清屏请使用下方独立操作。")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Toggle("发送后自动清屏", isOn: $clearAfterSending)
+                    if clearAfterSending { Stepper("\(clearAfterSeconds) 秒", value: $clearAfterSeconds, in: 1...600).frame(width: 180) }
+                }
+            }.card()
             HStack {
-                Toggle("发送后自动清屏", isOn: $clearAfterSending)
-                if clearAfterSending { Stepper("\(clearAfterSeconds) 秒", value: $clearAfterSeconds, in: 1...600).frame(width: 180) }
-            }
-            HStack {
-                Button("发送到眼镜", systemImage: "paperplane") { bridge.showText(caption, translation: answer, prompt: usePrompt, final: finalText, clearAfterMilliseconds: clearAfterSending ? clearAfterSeconds * 1000 : 0) }
-                    .buttonStyle(.borderedProminent)
-                Button("重新打开显示") { bridge.showText(caption, translation: answer, prompt: usePrompt, reopen: true, final: finalText, clearAfterMilliseconds: clearAfterSending ? clearAfterSeconds * 1000 : 0) }
-            }.disabled(unavailable || caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bridge.selectedAddress.isEmpty)
-            Button("清空当前屏幕", systemImage: "eraser") { bridge.clearDisplay(prompt: usePrompt) }
-                .disabled(unavailable || (usePrompt ? bridge.activeSession != .prompts && bridge.activeSession != .assistantAudio : bridge.activeSession != .captions))
+                HStack {
+                    Button("发送到眼镜", systemImage: "paperplane") { bridge.showText(caption, translation: answer, prompt: usePrompt, final: finalText, clearAfterMilliseconds: clearAfterSending ? clearAfterSeconds * 1000 : 0) }
+                        .buttonStyle(.borderedProminent)
+                    Button("重新打开显示") { bridge.showText(caption, translation: answer, prompt: usePrompt, reopen: true, final: finalText, clearAfterMilliseconds: clearAfterSending ? clearAfterSeconds * 1000 : 0) }
+                }.disabled(unavailable || caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bridge.selectedAddress.isEmpty)
+                Spacer()
+                Button("清空当前屏幕", systemImage: "eraser") { bridge.clearDisplay(prompt: usePrompt) }
+                    .disabled(unavailable || (usePrompt ? bridge.activeSession != .prompts && bridge.activeSession != .assistantAudio : bridge.activeSession != .captions))
+            }.controlSize(.large)
             Text("清屏保留显示会话和收音；新内容会取消上一条内容的延时清屏。")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -346,8 +399,7 @@ private struct DesktopControlView: View {
 
     private var videoPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("把本地视频变成眼镜上的字符动画").font(.headline)
-            Text("可用 Bad Apple 等黑白剪影视频。使用 26×7 全角字符格，无声播放；首版支持最长 10 分钟。").foregroundStyle(.secondary)
+            SectionTitle("把本地视频变成眼镜上的字符动画", detail: "可用 Bad Apple 等黑白剪影视频。使用 26×7 全角字符格，无声播放；首版支持最长 10 分钟。")
             HStack {
                 Button("选择视频…", systemImage: "folder") { bridge.chooseVideo() }
                     .disabled(unavailable || bridge.videoImporting || bridge.videoPlaying)
@@ -362,7 +414,8 @@ private struct DesktopControlView: View {
             }
             Text("对齐标尺包含方块、空白、全角字母和标点。先确认七行左右竖线对齐，再播放视频。").font(.caption).foregroundStyle(.secondary)
             if let video = bridge.textVideo {
-                Text("\(video.name) · \(Int(video.duration)) 秒").textSelection(.enabled)
+                Divider()
+                Text("\(video.name) · \(Int(video.duration)) 秒").font(.headline).textSelection(.enabled)
                 HStack {
                     Picker("字符", selection: $videoStyle) {
                         ForEach(TextVideoStyle.allCases) { Text($0.rawValue).tag($0) }
@@ -372,41 +425,44 @@ private struct DesktopControlView: View {
                         Text("10 帧/秒").tag(10)
                     }.frame(width: 170)
                 }.disabled(bridge.videoPlaying)
-                Toggle("黑白反转", isOn: $invertVideo).disabled(bridge.videoPlaying)
-                Toggle("增强对比度", isOn: $enhanceVideoContrast).disabled(bridge.videoPlaying)
-                Toggle("后续刷新时首行补一格", isOn: $alignVideoUpdates).disabled(bridge.videoPlaying)
+                HStack(spacing: 18) {
+                    Toggle("黑白反转", isOn: $invertVideo)
+                    Toggle("增强对比度", isOn: $enhanceVideoContrast)
+                    Toggle("后续刷新时首行补一格", isOn: $alignVideoUpdates)
+                }.disabled(bridge.videoPlaying)
                 Text("全角灰度按区域亮度选择字符，用全角空格占位。亮度以苹方字体校准，眼镜上的字形和对齐仍以标尺实测为准。").font(.caption).foregroundStyle(.secondary)
                 let preview = bridge.videoSeconds > 0 || bridge.videoPlaying ? bridge.videoPreview : video.frames[0].text(style: videoStyle, inverted: invertVideo, enhanceContrast: enhanceVideoContrast)
-                Text(preview).font(.custom("PingFangSC-Regular", size: 14)).lineSpacing(0)
-                    .padding(16).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+                LensSurface(title: "字符画面预览", live: bridge.videoPlaying) {
+                    Text(preview).font(.custom("PingFangSC-Regular", size: 14)).lineSpacing(0)
+                }
                 ProgressView(value: min(bridge.videoSeconds, video.duration), total: video.duration)
                 Text("\(Int(bridge.videoSeconds)) / \(Int(video.duration)) 秒").font(.caption).monospacedDigit()
                 HStack {
                     Button("从头播放到眼镜", systemImage: "play.fill") {
                         bridge.playVideo(style: videoStyle, fps: videoFPS, inverted: invertVideo, alignUpdates: alignVideoUpdates, enhanceContrast: enhanceVideoContrast)
-                    }.buttonStyle(.borderedProminent)
+                    }.buttonStyle(.borderedProminent).controlSize(.large)
                         .disabled(unavailable || bridge.videoImporting || bridge.videoPlaying || bridge.selectedAddress.isEmpty)
                 }
                 Text("连接跟不上时会跳帧，不积压追赶。播放结束后保留最后发送的画面；点击“结束显示”退出。").font(.caption).foregroundStyle(.secondary)
             }
-        }
+        }.card()
     }
 
     private var notificationPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
+            SectionTitle("发送一条通知")
             TextField("通知标题", text: $notificationTitle).textFieldStyle(.roundedBorder)
             editor($notificationBody, height: 150)
             Button("发送通知", systemImage: "bell.badge") { bridge.notify(title: notificationTitle, body: notificationBody) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.borderedProminent).controlSize(.large)
                 .disabled(unavailable || notificationBody.isEmpty || bridge.selectedAddress.isEmpty)
-        }
+        }.card()
     }
 
     private var audioPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
         VStack(alignment: .leading, spacing: 14) {
-            Text("直接使用眼镜麦克风").font(.headline)
-            Text("本地识别中文或英文；录音保存为双声道 WAV。开始后会替换当前实时提示会话。")
-                .font(.callout).foregroundStyle(.secondary)
+            SectionTitle("直接使用眼镜麦克风", detail: "本地识别中文或英文；录音保存为双声道 WAV。开始后会替换当前实时提示会话。")
             HStack(spacing: 24) {
                 Picker("识别语言", selection: $locale) { Text("中文").tag("zh-CN"); Text("English").tag("en-US") }.frame(width: 200)
                 Picker("时长", selection: $audioDuration) { Text("1 分钟").tag(60); Text("3 分钟").tag(180); Text("5 分钟").tag(300); Text("10 分钟").tag(600) }.frame(width: 180)
@@ -416,13 +472,13 @@ private struct DesktopControlView: View {
                 Button("开始语音识别", systemImage: "waveform") { bridge.startAudio(recognize: true, record: saveAudio, duration: audioDuration, locale: locale) }
                     .buttonStyle(.borderedProminent)
                 Button("仅录音", systemImage: "record.circle") { bridge.startAudio(recognize: false, record: true, duration: audioDuration, locale: locale) }
-            }.disabled(unavailable || bridge.selectedAddress.isEmpty || (bridge.activeSession == .asr || bridge.activeSession == .recording))
+            }.controlSize(.large).disabled(unavailable || bridge.selectedAddress.isEmpty || (bridge.activeSession == .asr || bridge.activeSession == .recording))
             if bridge.activeSession?.isAudio == true || bridge.audioSeconds > 0 {
                 Text(String(format: "已接收 %.1f 秒音频", bridge.audioSeconds)).monospacedDigit()
             }
             if !bridge.transcript.isEmpty {
                 Text(bridge.transcript).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+                    .padding(12).background(Token.textCodeBlockBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             if let path = bridge.recordingPath {
                 VStack(alignment: .leading, spacing: 8) {
@@ -434,10 +490,9 @@ private struct DesktopControlView: View {
                     }
                 }
             }
-            Divider()
-            Text("全天智记音频（实验）").font(.headline)
-            Text("按上方时长自动停止，可保存音频后回放。当前真机收到的是单声道，暂不替换两路虚拟麦克风；没有人声时可能不上传音频。")
-                .font(.callout).foregroundStyle(.secondary)
+        }.card()
+        VStack(alignment: .leading, spacing: 14) {
+            SectionTitle("全天智记音频（实验）", detail: "按上方时长自动停止，可保存音频后回放。当前真机收到的是单声道，暂不替换两路虚拟麦克风；没有人声时可能不上传音频。")
             Toggle("保存单声道 WAV 和原始音频分段", isOn: $saveLifeLogAudio)
                 .disabled(bridge.activeSession == .lifeLog)
             Text("保留的分段可在“录音资料库”恢复；恢复不会自动执行历史语音中的任务。")
@@ -454,21 +509,22 @@ private struct DesktopControlView: View {
                 Text(String(format: "已解码 %.1f 秒音频", bridge.lifeLogSeconds)).monospacedDigit()
                 Text(bridge.lifeLogChannels).font(.callout)
                 if bridge.lifeLogDecodeErrors > 0 {
-                    Text("解码失败：\(bridge.lifeLogDecodeErrors) 帧").foregroundStyle(.orange)
+                    Text("解码失败：\(bridge.lifeLogDecodeErrors) 帧").foregroundStyle(Token.bannerWarningForeground)
                 }
             }
             Text("声道 1：骨传导麦，采集自己。声道 2：前向麦，采集他人。当前 ASR 混合识别两路声音。")
                 .font(.caption).foregroundStyle(.secondary)
+        }.card()
         }
     }
 
     private var microphoneSettings: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("眼镜麦克风").font(.headline)
-            Text("连接后保持空闲。点击“进入麦克风模式”才开启双麦和实时提示，问题与回答可同时显示。")
-                .font(.callout).foregroundStyle(.secondary)
-            HStack {
-                Label(bridge.builtInMicrophonesReady ? "两路内置麦克风已就绪" : "尚未安装内置麦克风", systemImage: bridge.builtInMicrophonesReady ? "checkmark.circle" : "mic")
+            SectionTitle("眼镜麦克风", detail: "连接后保持空闲。点击“进入麦克风模式”才开启双麦和实时提示，问题与回答可同时显示。")
+            HStack(spacing: 10) {
+                if bridge.builtInMicrophonesReady { StatusChip(text: "两路内置麦克风已就绪") }
+                else { StatusChip(text: "尚未安装内置麦克风", active: false) }
+                Spacer()
                 Button("刷新设备") { bridge.refreshVirtualAudioDevices() }
                     .disabled(unavailable || bridge.microphoneForwarding)
                 Button(bridge.builtInMicrophonesReady ? "重新安装驱动…" : "安装内置驱动…") {
@@ -508,12 +564,17 @@ private struct DesktopControlView: View {
                 }
                 if !bridge.diagnostics.isEmpty { Text(bridge.diagnostics).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
             }.font(.callout).foregroundStyle(.secondary).padding(.top, 8).frame(maxWidth: .infinity, alignment: .leading)
-        }
+        }.card(padding: 16)
+    }
+
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text).font(.system(size: 13, weight: .semibold))
     }
 
     private func editor(_ text: Binding<String>, height: CGFloat) -> some View {
-        TextEditor(text: text).font(.body).padding(8).frame(height: height)
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.15)))
+        TextEditor(text: text).font(.body).scrollContentBackground(.hidden).padding(10).frame(height: height)
+            .background(Token.inputBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Token.widgetBorder))
     }
 }
 
@@ -541,8 +602,10 @@ private final class DesktopApplicationDelegate: NSObject, NSApplicationDelegate 
         editItem.submenu = editMenu
         menu.addItem(editItem)
         NSApp.mainMenu = menu
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 740), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "OpenRayneo"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.contentView = NSHostingView(rootView: DesktopControlView(bridge: bridge))
         window.isReleasedWhenClosed = false
         window.center()
