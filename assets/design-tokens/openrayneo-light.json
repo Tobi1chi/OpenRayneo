@@ -59,10 +59,6 @@
     "hud.indicatorInactive": "#7CF5C04D",
     "hud.divider": "#7CF5C033",
     "hud.border": "#FFFFFF0F",
-    "illustration.frame": "#1F2120",
-    "illustration.frameHighlight": "#FFFFFF24",
-    "illustration.lens": "#34403C",
-    "illustration.lensHighlight": "#FFFFFF2B",
     "illustration.shadow": "#00000017",
     "brand.markBackground": "#1C1C1C",
     "brand.markBorder": "#FFFFFF1A"

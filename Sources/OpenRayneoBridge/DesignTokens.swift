@@ -121,15 +121,7 @@ enum Token {
     static let hudDivider = color(light: 0x7CF5C033, dark: 0x7CF5C033)
     /// `hud.border`: Lens outline.
     static let hudBorder = color(light: 0xFFFFFF0F, dark: 0xFFFFFF14)
-    /// `illustration.frame`: Glasses illustration: front frame.
-    static let illustrationFrame = color(light: 0x1F2120FF, dark: 0x3A3C3BFF)
-    /// `illustration.frameHighlight`: Glasses illustration: sheen along the top of the frame.
-    static let illustrationFrameHighlight = color(light: 0xFFFFFF24, dark: 0xFFFFFF1A)
-    /// `illustration.lens`: Glasses illustration: tinted lens glass.
-    static let illustrationLens = color(light: 0x34403CFF, dark: 0x0F1513FF)
-    /// `illustration.lensHighlight`: Glasses illustration: reflection bands on the lens.
-    static let illustrationLensHighlight = color(light: 0xFFFFFF2B, dark: 0xFFFFFF12)
-    /// `illustration.shadow`: Glasses illustration: contact shadow under the frame.
+    /// `illustration.shadow`: Live 3D glasses: soft contact shadow under the model.
     static let illustrationShadow = color(light: 0x00000017, dark: 0x00000073)
     /// `brand.markBackground`: OR monogram tile.
     static let brandMarkBackground = color(light: 0x1C1C1CFF, dark: 0x1C1C1CFF)

@@ -5,7 +5,6 @@ package com.openrayneo.android
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -17,16 +16,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -136,70 +126,6 @@ internal fun CompanionTheme(appearance: String, content: @Composable () -> Unit)
             },
         content = content,
     )
-    }
-}
-
-/**
- * Flat front view of the AR glasses: brow-line frame, tinted lenses with reflection bands, the bridge camera,
- * and the waveguide display in the right lens. [live] lights the display and the hinge LED. Geometry is laid
- * out on a 300 x 112 grid and scaled to fit.
- */
-@Composable
-internal fun GlassesArtwork(modifier: Modifier = Modifier, live: Boolean = true) {
-    val t = tokens
-    Canvas(modifier.semantics { contentDescription = "RayNeo 智能眼镜" }) {
-        val unit = minOf(size.width / 300f, size.height / 112f)
-        val origin = Offset((size.width - 300f * unit) / 2, (size.height - 112f * unit) / 2)
-        fun p(x: Float, y: Float) = Offset(origin.x + x * unit, origin.y + y * unit)
-        fun sz(w: Float, h: Float) = Size(w * unit, h * unit)
-        // Wayfarer lens: flat top, sides easing into a rounded bottom.
-        fun lens(l: Float, r: Float, top: Float, bottom: Float) =
-            Path().apply {
-                val inset = (r - l) * .14f
-                val shoulder = top + (bottom - top) * .72f
-                moveTo(p(l, top).x, p(l, top).y)
-                lineTo(p(r, top).x, p(r, top).y)
-                val m = (l + r) / 2
-                cubicTo(p(r, shoulder).x, p(r, shoulder).y, p(r - inset, bottom).x, p(r - inset, bottom).y, p(m, bottom).x, p(m, bottom).y)
-                cubicTo(p(l + inset, bottom).x, p(l + inset, bottom).y, p(l, shoulder).x, p(l, shoulder).y, p(l, top).x, p(l, top).y)
-                close()
-            }
-
-        drawOval(t.illustrationShadow, p(40f, 101f), sz(220f, 9f))
-        val sides = listOf(20f to 144f, 156f to 280f)
-        sides.forEach { (l, r) -> drawPath(lens(l, r, 18f, 96f), t.illustrationFrame) }
-        drawRoundRect(t.illustrationFrame, p(6f, 11f), sz(288f, 24f), CornerRadius(10f * unit))
-        drawLine(t.illustrationFrameHighlight, p(16f, 13.5f), p(284f, 13.5f), 1.5f * unit, StrokeCap.Round)
-
-        sides.forEach { (l, r) ->
-            val glass = lens(l + 7f, r - 7f, 35f, 89f)
-            drawPath(glass, t.illustrationLens)
-            clipPath(glass) {
-                val w = r - l
-                fun band(from: Float, width: Float) =
-                    Path().apply {
-                        moveTo(p(l + w * from, 35f).x, p(l + w * from, 35f).y)
-                        lineTo(p(l + w * (from + width), 35f).x, p(l + w * (from + width), 35f).y)
-                        lineTo(p(l + w * (from + width - .3f), 89f).x, p(l + w * (from + width - .3f), 89f).y)
-                        lineTo(p(l + w * (from - .3f), 89f).x, p(l + w * (from - .3f), 89f).y)
-                        close()
-                    }
-                drawPath(band(.2f, .16f), t.illustrationLensHighlight)
-                drawPath(band(.42f, .05f), t.illustrationLensHighlight)
-            }
-        }
-
-        // Waveguide display: a small phosphor panel floating in the right lens.
-        val glyph = if (live) t.hudForeground else t.hudIndicatorInactive
-        drawRoundRect(glyph.copy(alpha = if (live) .16f else .1f), p(184f, 47f), sz(68f, 28f), CornerRadius(5f * unit))
-        drawLine(glyph, p(192f, 56f), p(226f, 56f), 2.6f * unit, StrokeCap.Round)
-        drawLine(glyph.copy(alpha = glyph.alpha * .55f), p(192f, 66f), p(240f, 66f), 2.6f * unit, StrokeCap.Round)
-        drawCircle(glyph, 2.2f * unit, p(243f, 56f))
-
-        // Bridge camera and hinge LED.
-        drawCircle(t.illustrationLens, 4.2f * unit, p(150f, 23f))
-        drawCircle(t.illustrationLensHighlight, 1.4f * unit, p(148.8f, 21.8f))
-        drawCircle(if (live) t.statusIndicatorActive else t.statusIndicatorInactive, 2.4f * unit, p(281f, 23f))
     }
 }
 

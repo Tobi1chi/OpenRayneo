@@ -1,5 +1,5 @@
 {
-  "step": 106,
+  "step": 117,
   "nodes": [
     {
       "id": "entry_input",
@@ -345,13 +345,13 @@
     },
     {
       "id": "speaker_channel_policy",
-      "label": "双通道本人/环境分工与全天混合全量分段",
+      "label": "双通道本人/环境分工、原生唤醒默认本人并自动更新本人声纹、全天混合全量分段",
       "status": "solid",
       "type": "port",
       "stage": "语音基础处理",
-      "spec": "用户已决定：眼镜双通道输入中，通道1固定默认本人，做转写及时间关联；通道2运行声纹识别和说话人分段并与转写对齐。全天智记回传混合声音，对完整混合输入运行声纹与分段。单声道输入按实际入口处理，不能仅因只有一个声道就默认本人。双路采集与按需保存、资源受限后补齐、来源通道/身份依据、历史纠正和同步需贯通；已取得的文字仍等待对应身份处理完成后交付，默认本人的通道无需等待无意义的声纹计算。具体队列、格式、调度与界面机制auto-default；旧单声道资料兼容。",
+      "spec": "用户已决定：眼镜双通道输入中，通道1固定默认本人，做转写及时间关联；通道2运行声纹识别和说话人分段并与转写对齐。2026-11-20用户补充：“小雷小雷”原生唤醒基本只有本人会喊，原生唤醒轮整轮默认本人（identityBasis native_wake_self），只做VAD与转写、不跑声纹和分段；轮内他人插话亦归本人，属已接受代价。同日用户确认：唤醒轮音频用来自动更新本机本人声纹档案，免去主动登记——轮结束后后台按登记切片提取，无档案时累计一致人声≥10秒、≥3段且占待定总量≥50%才建档，已有档案只收与档案top-3≥0.50的片段，自动样本最多10个先进先出，不替换手动样本；默认开启可关，可清除自动样本；Mac与手机各自独立，向量不出本机。全天智记回传混合声音，对完整混合输入运行声纹与分段。其他单声道输入按实际入口处理，不能仅因只有一个声道就默认本人。双路采集与按需保存、资源受限后补齐、来源通道/身份依据、历史纠正和同步需贯通；已取得的文字仍等待对应身份处理完成后交付，默认本人的通道无需等待无意义的声纹计算。具体队列、格式、调度与界面机制auto-default；旧单声道资料与旧声纹档案兼容（旧原生记录保留full_speaker）。 | [人工微调: 唤醒轮自动更新本人声纹：Mac LocalVoiceSelfLearning（DesktopChannelRound收ch1原音，finish后串行后台学习、Keychain写入在MainActor、写前重读）；Android SelfVoiceLearning＋ConversationController learner（仅NATIVE_SELF实时轮，排除登记／补齐／重放）；autoSamples/autoPending只留在本人、导出剥离；设置开关与清除自动样本；独立审查6项已修] | [人工微调: Mac实机首轮唤醒学习已写入档案；学习结果另存UserDefaults并显示在本机声音档案面板、写os日志，避免原生会话结束后ASR日志关闭而丢失] | [人工微调: Android38／1.2.0-beta.5出包（同签名覆盖37），含唤醒轮自动更新本人声纹；运行指南与架构事实同步]",
       "file_path": "Sources",
-      "last_tag": "node-speaker_channel_policy-s106"
+      "last_tag": "manual-speaker_channel_policy-s117"
     },
     {
       "id": "native_agent_session_reuse",
@@ -362,6 +362,26 @@
       "spec": "用户明确先修复小雷小雷每次交互新建DSH session的问题：原生助手连续交互与后续唤醒复用已有Agent对话及上下文，任务ID/录音记录/wakeID仍独立，迟到结果不能写新轮次。显式新对话或会话确已不可用时才按明确机制开新对话；同一复用对话内有序运行，取消不误杀其他轮次。具体会话键、持久映射、有效性与SDK接入auto-default；不改变声纹/分段模型与阈值。本轮随后准备电脑上的真实失败录音调试。",
       "file_path": "integrations/dsh-go",
       "last_tag": "node-native_agent_session_reuse-s95"
+    },
+    {
+      "id": "mac_recording_library",
+      "label": "Mac录音资料库转为日常回顾，测试工具移入开发者页",
+      "status": "solid",
+      "type": "port",
+      "stage": "Mac记录浏览",
+      "spec": "用户明确：Mac“录音资料库”主要定位为日常回顾，参照手机端时间优先的浏览方式（按天／月归类、总结与转写优先，不暴露原始ID等工程细节）；剪辑、标记、重新转写、分段恢复、官方云队列等测试与诊断功能整体移入单独的开发者页面，日常页面不再平铺。回顾内容来源与具体布局待下一步确定；视图实现auto-default。",
+      "file_path": "Sources/OpenRayneoBridge/RecordingLibraryPanel.swift",
+      "last_tag": ""
+    },
+    {
+      "id": "mac_review_source",
+      "label": "? Mac日常回顾的内容来源",
+      "status": "hole",
+      "type": "port",
+      "stage": "Mac记录浏览",
+      "spec": "待定：Mac日常回顾只看Mac本机录音，还是合并手机同步到Mac的持久副本（手机为全天记录主力、手机源权威）并标注来源。",
+      "file_path": "",
+      "last_tag": ""
     }
   ],
   "edges": [
@@ -519,6 +539,16 @@
       "from": "native_agent_session_reuse",
       "to": "voice_routing_responsibility",
       "contract": "本机Agent对话身份跨原生交互复用，独立任务与当前wakeID/SID保持回写和取消边界"
+    },
+    {
+      "from": "speaker_channel_policy",
+      "to": "mac_recording_library",
+      "contract": "Mac侧原生／全天分段／导入录音，带转写、摘要、标记与来源状态"
+    },
+    {
+      "from": "mac_recording_library",
+      "to": "mac_review_source",
+      "contract": "日常回顾页面展示的记录集合与来源标识"
     }
   ]
 }

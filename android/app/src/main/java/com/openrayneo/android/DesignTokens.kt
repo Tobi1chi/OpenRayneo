@@ -126,15 +126,7 @@ internal class ColorTokens(
     val hudDivider: Color,
     /** `hud.border`: Lens outline. */
     val hudBorder: Color,
-    /** `illustration.frame`: Glasses illustration: front frame. */
-    val illustrationFrame: Color,
-    /** `illustration.frameHighlight`: Glasses illustration: sheen along the top of the frame. */
-    val illustrationFrameHighlight: Color,
-    /** `illustration.lens`: Glasses illustration: tinted lens glass. */
-    val illustrationLens: Color,
-    /** `illustration.lensHighlight`: Glasses illustration: reflection bands on the lens. */
-    val illustrationLensHighlight: Color,
-    /** `illustration.shadow`: Glasses illustration: contact shadow under the frame. */
+    /** `illustration.shadow`: Live 3D glasses: soft contact shadow under the model. */
     val illustrationShadow: Color,
     /** `brand.markBackground`: OR monogram tile. */
     val brandMarkBackground: Color,
@@ -201,10 +193,6 @@ internal val LightColorTokens =
         hudIndicatorInactive = Color(0x4D7CF5C0),
         hudDivider = Color(0x337CF5C0),
         hudBorder = Color(0x0FFFFFFF),
-        illustrationFrame = Color(0xFF1F2120),
-        illustrationFrameHighlight = Color(0x24FFFFFF),
-        illustrationLens = Color(0xFF34403C),
-        illustrationLensHighlight = Color(0x2BFFFFFF),
         illustrationShadow = Color(0x17000000),
         brandMarkBackground = Color(0xFF1C1C1C),
         brandMarkBorder = Color(0x1AFFFFFF),
@@ -269,10 +257,6 @@ internal val DarkColorTokens =
         hudIndicatorInactive = Color(0x4D7CF5C0),
         hudDivider = Color(0x337CF5C0),
         hudBorder = Color(0x14FFFFFF),
-        illustrationFrame = Color(0xFF3A3C3B),
-        illustrationFrameHighlight = Color(0x1AFFFFFF),
-        illustrationLens = Color(0xFF0F1513),
-        illustrationLensHighlight = Color(0x12FFFFFF),
         illustrationShadow = Color(0x73000000),
         brandMarkBackground = Color(0xFF1C1C1C),
         brandMarkBorder = Color(0x1AFFFFFF),

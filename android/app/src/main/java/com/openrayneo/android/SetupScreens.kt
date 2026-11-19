@@ -71,7 +71,7 @@ internal fun OnboardingScreen(
             when (step) {
                 0 -> {
                     GlassesArtwork(
-                        Modifier.fillMaxWidth().height(90.dp),
+                        Modifier.fillMaxWidth().height(132.dp),
                     )
                     SetupRow(Icons.Outlined.NearMe, "抬眼看导航", "跟随手机高德的真实导航通知")
                     SetupRow(Icons.Outlined.AutoAwesome, "随时问助手", "连接手机本机 Agent 与电脑 Codex")
@@ -80,7 +80,8 @@ internal fun OnboardingScreen(
                 1 -> {
                     ContentCard {
                         GlassesArtwork(
-                            Modifier.fillMaxWidth().height(110.dp),
+                            Modifier.fillMaxWidth().height(132.dp),
+                            pose = model.state.glasses.link.phase.glassesPose(),
                         )
                         Text(
                             if (model.state.glasses.link.phase == LinkPhase.FULL) "眼镜已连接"

@@ -65,6 +65,12 @@
       "source": "https://www.rfc-editor.org/rfc/rfc6716.html#section-2.1.2",
       "note": "Android子代理已核对：同Opus流可逐帧mono/stereo coded，立体声输入可编码mono，双通道decoder输出复制L/R。路别策略按会话/实际PCM格式，不能把TOC编码声道数当物理通道数触发拒包或分卷。",
       "added_at": "2026-11-16T12:37:05"
+    },
+    {
+      "type": "human_verify",
+      "source": "2026-11-20 Mac speaker-threshold-050 本人native 39.3秒",
+      "note": "门槛0.50后实时10段全部voiceprint匹配登记人物，离线1组；Android待实测",
+      "added_at": "2026-11-20T05:54:47"
     }
   ]
 }

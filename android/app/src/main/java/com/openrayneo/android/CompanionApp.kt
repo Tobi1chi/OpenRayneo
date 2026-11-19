@@ -295,8 +295,8 @@ private fun GlassesScreen(
                         }
                 }
                 GlassesArtwork(
-                    Modifier.fillMaxWidth().height(96.dp).padding(horizontal = 16.dp),
-                    live = linked,
+                    Modifier.fillMaxWidth().height(132.dp),
+                    pose = state.link.phase.glassesPose(),
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(model.deviceName, style = MaterialTheme.typography.headlineSmall)

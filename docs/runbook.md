@@ -4,10 +4,10 @@
 
 ## 当前本地候选
 
-- Mac：[声音诊断应用](../.build/speaker-match-diagnostics/OpenRayneoBridge.app)；上一自动保存版位于 `.build/speaker-compare-candidate/`。
-- Android：[37 release](../android/app/build/outputs/candidates/android37-1.2.0-beta.4/OpenRayneo-v37-release.apk)、[37 debug](../android/app/build/outputs/candidates/android37-1.2.0-beta.4/OpenRayneo-v37-debug.apk)，版本 `1.2.0-beta.4`。
+- Mac：[唤醒轮自动更新本人声纹应用](../.build/native-self-learning/OpenRayneoBridge.app)（含原生唤醒默认本人、声纹0.50与实时双麦WAV）；上一版位于 `.build/native-wake-self/`。
+- Android：[38 release](../android/app/build/outputs/candidates/android38-1.2.0-beta.5/OpenRayneo-v38-release.apk)、[38 debug](../android/app/build/outputs/candidates/android38-1.2.0-beta.5/OpenRayneo-v38-debug.apk)，版本 `1.2.0-beta.5`（唤醒轮自动更新本人声纹、原生唤醒默认本人、声纹门槛0.50）；同签名覆盖37。
 - DSH：[插件0.1.8](../android/app/build/outputs/candidates/android37-1.2.0-beta.4/openrayneo-dsh-0.1.8.tgz)。Android36及之后沿用该版插件。
-- Android回退：[36 release](../android/app/build/outputs/candidates/android36-1.2.0-beta.3/OpenRayneo-v36-release.apk)。同签名覆盖安装保留配置与记录，私有库与Keystore一起保留。
+- Android回退：[37 release](../android/app/build/outputs/candidates/android37-1.2.0-beta.4/OpenRayneo-v37-release.apk)、[36 release](../android/app/build/outputs/candidates/android36-1.2.0-beta.3/OpenRayneo-v36-release.apk)。同签名覆盖安装保留配置与记录，私有库与Keystore一起保留。
 
 这些是开发机产物；当前源码构建以本页命令为准，仓库不提交安装包、模型下载物或私钥。
 
@@ -23,6 +23,8 @@ open .build/dev-candidate/OpenRayneoBridge.app
 ```
 
 界面颜色只在 `assets/design-tokens/` 修改（VS Code式语义token：`registry.json` 登记含义，明暗主题JSON给色值），随后运行 `uv run python scripts/generate-design-tokens.py` 重新生成 `DesignTokens.swift` 与 `DesignTokens.kt`；生成文件不手改。
+
+实时3D眼镜使用 `assets/models/` 的同一模型：`scripts/build-app.sh` 把 `rayneo-io.usdz` 放入Mac App资源，Android构建把 `rayneo-io.glb` 同步进APK assets；替换模型时保留部件命名（左右镜腿、铰链、镜片、状态灯）。
 
 打包使用现有脚本的签名、内嵌库与RPATH流程。读取已有声纹时使用正常签名的App；独立未授权helper可能触发钥匙串提示。分发包通过 `sh scripts/package-release.sh` 生成，发布与上传按相应任务授权执行。
 
@@ -78,10 +80,12 @@ dsh plugin --profile web add "$HOME/.dsh/dsh-go/plugins/openrayneo-dsh"
 
 ## 声音与录音
 
-- 原生自动接听需要显式开启。双路默认ch1本人、ch2完整说话人；native／全天混合mono全量处理。手工登记默认选实时ch1，Mac与手机声纹库独立。
+- 原生自动接听需要显式开启。双路默认ch1本人、ch2完整说话人；native／全天混合mono全量处理。手工登记默认选实时ch1，Mac与手机声纹库独立。“小雷小雷”唤醒轮默认在本机自动更新本人声纹（无档案时累计一致人声≥10秒、3段自动建档；已有档案只收≥0.50的片段，自动样本最多10个、不替换手动样本），Mac在“声音与说话人 → 本机声音档案”、手机在“语音与记忆配置”开关，人物卡可“清除自动样本”。
 - Mac每次原生capture自动流式保存最近完整WAV，位置为 `~/Library/Application Support/OpenRayneo/NativeDiagnostics/`。`GET /v1/assistant/native/diagnostic`查询当前状态和`latest`，核对captureID、complete、frames和路径后使用；无需arm或等待窗口，保存不受ASR游标清理影响。
 - 下次完整会话成功后，旧WAV移入Trash；异常轮不冒充完整，当前失败与上一有效latest分别给出。原生capture沿用既有时长设置，保存没有额外60秒截断。
+- 实时双麦（AI助手“实时提示双麦”与“声音与说话人”眼镜收音）默认不落盘；在“录音开发者工具”打开“自动保存最近一轮实时双麦 WAV”后，下一次开始收音起保存到 `~/Library/Application Support/OpenRayneo/RealtimeDiagnostics/`，规则同上（丢包、解码错误或中断的一轮不覆盖上一份）。眼镜已连接时 `GET /v1/assistant-audio/diagnostic` 查询状态与`latest`，未连接时直接读该目录的`latest.json`。
 - Mac“内容 → 声音与说话人”选择文件，先关闭ASR分析边界和身份；“本轮结果”可逐段回听。“导出结果”的`matchingDiagnostics`包含参考／query标量矩阵，原导出人物与文字字段保持。
+- Mac“录音资料库”按天回看本机与手机副本记录，手机原音点“从手机获取”（需服务运行且已连接同步）；剪辑、标记、重转写和恢复在“录音开发者工具”页。
 - 手机“记录 → 记录日程”打开已结束记录，“导出WAV”保留原通道；当前正在录制的那条先停止并等待收尾。文件名不用于判断native／实时／全天来源。
 - 实际声纹仍有漏认与单人误分组，当前基准和下一步见 [未解决问题](../.arch/ground_truth.md#当前实现与未解决问题)。
 

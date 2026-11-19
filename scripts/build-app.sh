@@ -30,6 +30,7 @@ mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Conte
 cp "$workspace_dir/.build/release/openrayneo-bridge" "$app_dir/Contents/MacOS/openrayneo-bridge"
 cp "$workspace_dir/Info.plist" "$app_dir/Contents/Info.plist"
 cp "$workspace_dir/assets/icons/OpenRayneo.icns" "$app_dir/Contents/Resources/OpenRayneo.icns"
+cp "$workspace_dir/assets/models/rayneo-io.usdz" "$app_dir/Contents/Resources/rayneo-io.usdz"
 mkdir -p "$app_dir/Contents/Resources/AgentSkill/openrayneo-api"
 cp -R "$workspace_dir/.agents/skills/openrayneo-api/." "$app_dir/Contents/Resources/AgentSkill/openrayneo-api/"
 cp "$workspace_dir/docs/runbook.md" "$app_dir/Contents/Resources/Usage.md"

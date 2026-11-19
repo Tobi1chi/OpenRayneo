@@ -7,6 +7,7 @@ import SwiftUI
 private enum ControlPage: String, CaseIterable, Identifiable {
     case workspace = "Agent 工作台", setup = "设备连接", officialAccount = "官方账号", settings = "眼镜设置", homeContent = "首页内容", dashboardCards = "首页预览与布局", nativeRecording = "原生录音", recordingLibrary = "录音资料库", memory = "回忆与项目", files = "文件传输", maintenance = "固件与日志", feedback = "问题反馈", navigation = "导航演示", video = "字符视频", text = "文字显示", notification = "通知", teleprompter = "提词器", audio = "语音与录音", assistant = "AI 助手"
     case voice = "声音与说话人"
+    case recordingDeveloper = "录音开发者工具"
     case ota = "固件升级"
     var id: String { rawValue }
     var icon: String {
@@ -19,6 +20,7 @@ private enum ControlPage: String, CaseIterable, Identifiable {
         case .settings: return "gearshape"
         case .nativeRecording: return "record.circle"
         case .recordingLibrary: return "waveform.and.magnifyingglass"
+        case .recordingDeveloper: return "hammer"
         case .memory: return "books.vertical"
         case .files: return "arrow.up.arrow.down"
         case .dashboardCards: return "rectangle.grid.1x2"
@@ -76,48 +78,55 @@ private struct DesktopControlView: View {
                         .background(Token.bannerWarningBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .padding(.horizontal, 36).padding(.bottom, 14)
                 }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        switch page {
-                        case .workspace: AgentWorkspacePanel(bridge: bridge)
-                        case .setup: setupPanel
-                        case .officialAccount:
-                            OfficialAccountPanel()
-                            OfficialCloudDevicesPanel(model: bridge.cloudDevices)
-                        case .settings: GlassesSettingsPanel(model: bridge.glassesSettings, openDashboard: { page = .dashboardCards })
-                        case .nativeRecording: NativeRecordingPanel(model: bridge.nativeRecording)
-                        case .recordingLibrary: RecordingLibraryPanel(model: bridge.recordingLibrary)
-                        case .voice: LocalVoicePanel(bridge: bridge, model: bridge.voiceLab, asr: bridge.localASR)
-                        case .memory:
-                            MemoryLibraryPanel(model: bridge.memoryLibrary, openRecording: { id in
-                                bridge.recordingLibrary.selectedID = id
-                                page = .recordingLibrary
-                            })
-                        case .files: FileTransfersPanel(model: bridge.files)
-                        case .dashboardCards:
-                            DashboardHomePanel(bridge: bridge)
-                        case .maintenance:
-                            MaintenancePanel(model: bridge.maintenance)
-                        case .ota: OTAUpdatePanel(model: bridge.ota)
-                        case .feedback: OfficialFeedbackPanel(model: bridge.feedback)
-                        case .homeContent:
-                            CurrentLocationWeatherPanel(model: bridge.currentLocationWeather)
-                            HomeContentPanel(model: bridge.homeContent, schedules: bridge.schedules, calendarSync: bridge.calendarSync)
-                        case .navigation: navigationPanel
-                        case .video: videoPanel
-                        case .text: textPanel
-                        case .notification:
-                            notificationPanel
-                            NotificationMirrorPanel(model: bridge.notificationMirror)
-                        case .teleprompter: TeleprompterLibraryPanel(model: bridge.teleprompterLibrary)
-                        case .audio:
-                            audioPanel
-                            CaptionSettingsPanel(model: bridge.captionSettings)
-                        case .assistant: AssistantPanel(model: bridge.assistant, bridge: bridge)
-                        }
-                        if page == .setup { connectionHelp }
-                    }.frame(maxWidth: 960, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 36).padding(.bottom, 32)
+                if page == .recordingLibrary {
+                    RecordingReviewPanel(library: bridge.recordingLibrary, bridge: bridge, serviceRunning: bridge.serviceRunning)
+                        .padding(.horizontal, 36).padding(.bottom, 20)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            switch page {
+                            case .workspace: AgentWorkspacePanel(bridge: bridge)
+                            case .setup: setupPanel
+                            case .officialAccount:
+                                OfficialAccountPanel()
+                                OfficialCloudDevicesPanel(model: bridge.cloudDevices)
+                            case .settings: GlassesSettingsPanel(model: bridge.glassesSettings, openDashboard: { page = .dashboardCards })
+                            case .nativeRecording: NativeRecordingPanel(model: bridge.nativeRecording)
+                            case .recordingLibrary: EmptyView() // Rendered full-height above, outside this ScrollView, so its two columns scroll independently.
+                            case .recordingDeveloper: RecordingDeveloperPanel(model: bridge.recordingLibrary)
+                            case .voice: LocalVoicePanel(bridge: bridge, model: bridge.voiceLab, asr: bridge.localASR)
+                            case .memory:
+                                MemoryLibraryPanel(model: bridge.memoryLibrary, openRecording: { id in
+                                    bridge.recordingLibrary.selectedID = id
+                                    bridge.recordingLibrary.reviewRequestID = id
+                                    page = .recordingLibrary
+                                })
+                            case .files: FileTransfersPanel(model: bridge.files)
+                            case .dashboardCards:
+                                DashboardHomePanel(bridge: bridge)
+                            case .maintenance:
+                                MaintenancePanel(model: bridge.maintenance)
+                            case .ota: OTAUpdatePanel(model: bridge.ota)
+                            case .feedback: OfficialFeedbackPanel(model: bridge.feedback)
+                            case .homeContent:
+                                CurrentLocationWeatherPanel(model: bridge.currentLocationWeather)
+                                HomeContentPanel(model: bridge.homeContent, schedules: bridge.schedules, calendarSync: bridge.calendarSync)
+                            case .navigation: navigationPanel
+                            case .video: videoPanel
+                            case .text: textPanel
+                            case .notification:
+                                notificationPanel
+                                NotificationMirrorPanel(model: bridge.notificationMirror)
+                            case .teleprompter: TeleprompterLibraryPanel(model: bridge.teleprompterLibrary)
+                            case .audio:
+                                audioPanel
+                                CaptionSettingsPanel(model: bridge.captionSettings)
+                            case .assistant: AssistantPanel(model: bridge.assistant, bridge: bridge)
+                            }
+                            if page == .setup { connectionHelp }
+                        }.frame(maxWidth: 960, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 36).padding(.bottom, 32)
+                    }
                 }
                 HStack(spacing: 8) {
                     if bridge.busy || bridge.stopping { ProgressView().controlSize(.small) }
@@ -144,7 +153,7 @@ private struct DesktopControlView: View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(page.rawValue).font(.system(size: 26, weight: .semibold)).tracking(-0.3)
-                Text(page == .officialAccount ? "管理雷鸟官方会话和云端设备" : page == .feedback ? "向官方反馈问题，管理本地草稿与附件" : page == .workspace ? "本机服务 · 按需收音 · Agent 控制" : bridge.activeSession.map { "当前功能：\($0.title)" } ?? "准备好后发送到眼镜")
+                Text(page == .officialAccount ? "管理雷鸟官方会话和云端设备" : page == .feedback ? "向官方反馈问题，管理本地草稿与附件" : page == .workspace ? "本机服务 · 按需收音 · Agent 控制" : page == .recordingLibrary ? "按天回看手机与 Mac 的录音、摘要和对话" : page == .recordingDeveloper ? "剪辑、标记、重新转写和恢复本机录音，用于测试与排错" : bridge.activeSession.map { "当前功能：\($0.title)" } ?? "准备好后发送到眼镜")
                     .font(.system(size: 13)).foregroundStyle(.secondary)
             }
             Spacer()
@@ -184,6 +193,8 @@ private struct DesktopControlView: View {
 
     private var deviceCard: some View {
         VStack(alignment: .leading, spacing: 10) {
+            GlassesModelView(pose: bridge.connected ? .connected : bridge.serviceRunning && !bridge.localServicesOnly ? .connecting : .resting)
+                .frame(height: 104).padding(.horizontal, -12).padding(.top, -6)
             HStack(spacing: 8) {
                 SignalDot(active: bridge.connected)
                 Text(bridge.phase).font(.system(size: 12.5, weight: .medium)).lineLimit(2).help(bridge.phase)
@@ -254,7 +265,7 @@ private struct DesktopControlView: View {
         switch group {
         case "工作台": return [.workspace, .assistant, .text]
         case "眼镜": return [.setup, .settings, .dashboardCards, .homeContent, .ota]
-        case "内容": return [.notification, .teleprompter, .nativeRecording, .recordingLibrary, .voice, .memory]
+        case "内容": return [.notification, .teleprompter, .nativeRecording, .recordingLibrary, .recordingDeveloper, .voice, .memory]
         default: return [.audio, .files, .maintenance, .navigation, .video]
         }
     }
