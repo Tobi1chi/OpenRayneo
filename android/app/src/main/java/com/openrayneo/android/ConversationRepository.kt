@@ -42,6 +42,16 @@ internal class ConversationRepository(context: Context) {
             revision = it.revision + 1, changeSequence = ++sequence) else it } + updated
         writePeople()
     }
+    /** Several profile changes land in one people write, so an exit between them cannot lose either side. */
+    @Synchronized private fun savePeople(changed: List<VoicePerson>) {
+        val old = people.associateBy { it.id }
+        val updated = changed.map { person -> person.copy(revision = (old[person.id]?.revision ?: 0) + 1, changeSequence = ++sequence,
+            autoSamples = if (person.self) person.autoSamples else emptyList(), autoPending = if (person.self) person.autoPending else emptyList()) }
+        val ids = updated.map { it.id }.toSet(); val newSelf = updated.any { it.self }
+        people = people.filter { it.id !in ids }.map { if (newSelf && it.self) it.copy(self = false, autoSamples = emptyList(), autoPending = emptyList(),
+            revision = it.revision + 1, changeSequence = ++sequence) else it } + updated
+        writePeople()
+    }
     @Synchronized fun removeVoice(personId: String) { people.firstOrNull { it.id == personId }?.let { savePerson(it.copy(samples = emptyList(), autoSamples = emptyList(), autoPending = emptyList())) } }
     @Synchronized fun clearAutoSamples(personId: String) { people.firstOrNull { it.id == personId }?.let { savePerson(it.copy(autoSamples = emptyList(), autoPending = emptyList())) } }
     @Synchronized fun learnSelf(windows: List<Pair<FloatArray, Float>>): SelfVoiceLearning.Outcome {
@@ -114,8 +124,9 @@ internal class ConversationRepository(context: Context) {
         val sources = people.filter { it.id in sourceIds && it.id != targetId }
         val self = target.self || sources.any { it.self }
         val auto = if (self) (target.autoSamples + sources.flatMap { it.autoSamples }).sortedBy { it.at }.takeLast(SelfVoiceLearning.MAX_AUTO) else emptyList()
-        sources.forEach { savePerson(it.copy(mergedInto = targetId, self = false, autoSamples = emptyList(), autoPending = emptyList())) }
-        savePerson(people.first { it.id == targetId }.copy(samples = (target.samples + sources.flatMap { it.samples }).takeLast(20), self = self, autoSamples = auto))
+        val pending = if (self) (target.autoPending + sources.flatMap { it.autoPending }).sortedBy { it.at }.takeLast(SelfVoiceLearning.MAX_PENDING) else emptyList()
+        savePeople(sources.map { it.copy(mergedInto = targetId, self = false) } +
+            target.copy(samples = (target.samples + sources.flatMap { it.samples }).takeLast(20), self = self, autoSamples = auto, autoPending = pending))
         records.filter { it.id in recordIds }.forEach { row ->
             correctSpeaker(row.id, row.segments.filter { it.personId in sourceIds }.map { it.id }.toSet(), targetId)
         }

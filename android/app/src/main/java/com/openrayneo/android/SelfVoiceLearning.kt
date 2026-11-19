@@ -33,11 +33,13 @@ internal object SelfVoiceLearning {
                 if (index != seed && group.all { cosine(pending[it].vector, pending[index].vector) >= 0.5f }) group += index
             }
             val seconds = group.sumOf { pending[it].seconds.toDouble() }.toFloat()
-            if (seconds > bestSeconds) { bestSeconds = seconds; best = group.map { pending[it] } }
+            if (seconds > bestSeconds) { bestSeconds = seconds; best = group.sorted().map { pending[it] } }
         }
         // Same 10 s / 3 window bar as manual enrollment; the wearer must be the majority of the pooled wake speech.
         return if (bestSeconds >= 10f && best.size >= 3 && bestSeconds >= total * 0.5f) {
-            val auto = best.sortedByDescending { it.seconds }.take(MAX_AUTO)
+            // Keep the longest windows but in capture order, so later FIFO eviction drops the oldest first.
+            val keep = best.indices.sortedByDescending { best[it].seconds }.take(MAX_AUTO).toSet()
+            val auto = best.filterIndexed { index, _ -> index in keep }
             person.copy(autoSamples = auto, autoPending = emptyList()) to Outcome(auto.size, bootstrapped = true)
         } else person.copy(autoPending = pending) to Outcome(pendingSeconds = total)
     }

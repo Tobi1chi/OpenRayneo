@@ -37,6 +37,12 @@ internal class ConversationController(private val context: Context, private val 
     private val writer = Handler(writerThread.looper)
     private val inference = Executors.newSingleThreadExecutor()
     private val queuedSamples = AtomicInteger()
+    // Live wake PCM queued for self learning; bounded on its own so a slow worker cannot accumulate audio jobs.
+    private val learnQueued = AtomicInteger()
+    @Volatile private var learnLive = false
+    private var learnGap = false // writer thread only
+    /** Bumped by manual profile changes; PCM captured before a bump is never learned. */
+    @Volatile private var learnGeneration = 0
     val repository = ConversationRepository(context)
     val recordings = MeetingAudioStore(context)
     val modePolicy = VoiceModePolicy(context)
@@ -127,6 +133,7 @@ internal class ConversationController(private val context: Context, private val 
     fun start(mode: ConversationMode, source: ConversationSource, target: VoicePerson? = null, wakeId: String? = null) {
         check(!state.running && !closing) { "请先停止当前记录" }; check(state.modelReady) { state.error ?: "声音模型尚未准备完成" }
         val cfg = settings.read(); val token = ++generation
+        learnLive = mode != ConversationMode.ENROLL && source == ConversationSource.NATIVE && cfg.optString(SelfVoiceLearning.KEY, "true") != "false"
         publish(state.copy(activeRecord = null, running = true, stopping = false, mode = mode, source = source, segments = emptyList(), error = null,
             status = if (mode == ConversationMode.ENROLL) "登记仅采集指定声道的本人声音" else if (source == ConversationSource.REALTIME) "双路保留：通道1默认本人，通道2独立识别" else if (source == ConversationSource.NATIVE) "原生唤醒：本轮默认本人" else "混合/单路音频全量识别说话人",
             enrollmentSeconds = 0f, enrollmentReady = false, enrollmentCanConfirm = false, enrollmentTotalSeconds = 0f, decodedSeconds = 0.0))
@@ -162,6 +169,8 @@ internal class ConversationController(private val context: Context, private val 
     }
     fun accept(left: ShortArray, right: ShortArray) {
         if (!state.running || closing || replaying) return
+        // Snapshot at arrival: PCM captured before a manual profile change must not be learned after it.
+        val learning = learnGeneration
         val token = generation
         writer.post {
             if (token != generation) return@post
@@ -177,6 +186,20 @@ internal class ConversationController(private val context: Context, private val 
                 val start = samples
                 if (savingAudio) recordings.appendChannels(pcm)
                 samples += pcm.frames
+                // Self learning follows the live wake audio itself, so a missing ASR key or backlog does not starve it.
+                if (learnLive && learnQueued.get() >= 30 * 16000) learnGap = true
+                else if (learnLive) {
+                    // A dropped stretch splits utterances: the learner closes the current one before continuing.
+                    val lane = pcm.channels[0]; val gap = learnGap; learnGap = false; learnQueued.addAndGet(lane.size)
+                    worker.post {
+                        try {
+                            if (token == generation && learning == learnGeneration && learningSelf()) {
+                                if (gap) learner?.let { it.flush(); harvest(it); it.reset(enrollment = true) }
+                                learnFrom(lane)
+                            }
+                        } finally { learnQueued.addAndGet(-lane.size) }
+                    }
+                }
                 val queued = queuedSamples.addAndGet(pcm.frames)
                 if (queued > 240_000 && savingAudio) deferredProcessing = true
                 if (deferredProcessing || liveBackfill) {
@@ -207,14 +230,15 @@ internal class ConversationController(private val context: Context, private val 
             activeASR[channel]?.append(selected)
             inputThrough[channel] = startFrame + data.size
             if (!fixedSelf(channel)) engine(channel).accept(selected)
-            if (channel == 1 && learningSelf()) learnFrom(selected)
         }
         drainSentences()
     }
     private fun learningSelf() = record?.channelPolicy == SpeakerChannelPolicy.NATIVE_SELF && state.mode != ConversationMode.ENROLL &&
-        !replaying && !liveBackfill && config.optString(SelfVoiceLearning.KEY, "true") != "false"
+        !replaying && config.optString(SelfVoiceLearning.KEY, "true") != "false"
     private fun learner(): SpeakerEngine = learner ?: SpeakerEngine(context, { emptyList() }, { SpeakerEngine.DEFAULT_THRESHOLD }, { _, _ -> })
         .also { it.reset(enrollment = true); learner = it }
+    /** A manual profile change invalidates speech buffered before it. */
+    private fun discardLearning() { learnGeneration++; learnedWindows.clear(); learner?.reset(enrollment = true) }
     private fun learnFrom(data: FloatArray) { val engine = learner(); engine.accept(data); harvest(engine) }
     /** Enrollment evidence is a bounded rolling window, so windows move out as soon as they appear. */
     private fun harvest(engine: SpeakerEngine) {
@@ -280,13 +304,15 @@ internal class ConversationController(private val context: Context, private val 
         writer.post { val base = samples; worker.post {
             if (token != generation || !state.running || closing) return@post
             record = record?.let { it.copy(audioAnchors = it.audioAnchors.filter { a -> a.offsetMS != base / 16 } + AudioAnchor(base / 16, receivedAt)) }; saveRecord()
+            learnSelf()
             if (liveBackfill) return@post
-            engines.values.forEach { it.beginRound(base / 16) }; drainSentences(); finishRounds(); learnSelf(); roundId = wakeId; roundBaseMS = base / 16
+            engines.values.forEach { it.beginRound(base / 16) }; drainSentences(); finishRounds(); roundId = wakeId; roundBaseMS = base / 16
             lanes().forEach { laneStarts[it] = base }
         } }
     }
     fun endRound() { writer.post { worker.post {
-        if (state.running && !closing && !liveBackfill) { engines.values.forEach { it.flush() }; drainSentences(); finishRounds(); learnSelf(); drainAgent() }
+        if (state.running && !closing) learnSelf()
+        if (state.running && !closing && !liveBackfill) { engines.values.forEach { it.flush() }; drainSentences(); finishRounds(); drainAgent() }
     } } }
     fun transportError(message: String) = fail(message, generation)
     fun report(message: String) { publish(state.copy(error = message)) }
@@ -429,7 +455,7 @@ internal class ConversationController(private val context: Context, private val 
                 val pending = if (liveBackfill) deferredProcessing || tailSamples < count else deferredProcessing || record?.processingPending == true
                 record = record?.copy(audioSamples = count, audioPending = false, endedAt = record?.endedAt ?: System.currentTimeMillis(), processingPending = pending)
                 tail?.close(); tail = null; liveBackfill = false
-                engines.values.forEach { it.flush() }; drainSentences(); finishRounds()
+                engines.values.forEach { it.flush() }; drainSentences(); finishRounds(); learnSelf()
                 if (rounds.isEmpty()) completeStop() else {
                     val token = generation
                     drainTimeout = Runnable { if (token == generation && closing) { cancelASR(); replayFailed = replaying; deferredProcessing = true; record = record?.copy(processingPending = true); completeStop("未完成的声道稍后从原音频补齐") } }
@@ -463,9 +489,13 @@ internal class ConversationController(private val context: Context, private val 
         check(state.running && state.mode == ConversationMode.ENROLL && !closing)
         engine(enrollmentChannel).flush(); val assessment = engine(enrollmentChannel).enrollment()
         check(assessment.ready || confirmAllSamples && assessment.confirmationVectors.isNotEmpty()) { assessment.message }
-        val stored = enrollmentTarget?.let { target -> repository.people.firstOrNull { it.id == target.id } ?: target }
-        val person = (stored ?: VoicePerson(name = name, self = self, contactUri = contactUri)).copy(name = name, self = self,
-            contactUri = contactUri, samples = if (assessment.ready) assessment.vectors else assessment.confirmationVectors, unnamed = false, autoPending = emptyList())
+        var stored = enrollmentTarget?.let { target -> repository.people.firstOrNull { it.id == target.id } ?: target }
+        // The target may have been merged while recording; save onto the profile that is still active.
+        while (stored?.mergedInto != null) stored = repository.people.firstOrNull { it.id == stored!!.mergedInto } ?: break
+        // A profile reached through a merge keeps its own current name and contact; only the voice fields change.
+        val merged = stored != null && enrollmentTarget != null && stored.id != enrollmentTarget!!.id
+        val person = (stored ?: VoicePerson(name = name, self = self, contactUri = contactUri)).copy(name = if (merged) stored!!.name else name, self = self,
+            contactUri = if (merged) stored!!.contactUri else contactUri, samples = if (assessment.ready) assessment.vectors else assessment.confirmationVectors, unnamed = false, autoPending = emptyList())
         repository.savePerson(person); publish(state.copy(people = repository.people, status = "${person.name}的声音已保存在本机")); stop()
     } }
     fun bind(recordId: String, speakerLabel: String, person: VoicePerson, rememberVoice: Boolean) { worker.post {
@@ -491,6 +521,7 @@ internal class ConversationController(private val context: Context, private val 
         publish(state.copy(people = repository.people))
     } }
     fun mergePeople(sourceIds: Set<String>, targetId: String, recordIds: Set<String>) { worker.post {
+        discardLearning()
         repository.mergePeople(sourceIds, targetId, recordIds)
         record?.let { active -> record = repository.records.firstOrNull { it.id == active.id } ?: active }
         publish(state.copy(records = repository.records, people = repository.people))
@@ -512,8 +543,8 @@ internal class ConversationController(private val context: Context, private val 
     fun correctMemory(recordId: String, memoryId: String, subject: String, text: String) { worker.post {
         repository.correctMemory(recordId, memoryId, subject, text); publish(state.copy(records = repository.records))
     } }
-    fun removeVoice(id: String) { worker.post { repository.removeVoice(id); publish(state.copy(people = repository.people)) } }
-    fun clearAutoSamples(id: String) { worker.post { repository.clearAutoSamples(id); publish(state.copy(people = repository.people)) } }
+    fun removeVoice(id: String) { worker.post { discardLearning(); repository.removeVoice(id); publish(state.copy(people = repository.people)) } }
+    fun clearAutoSamples(id: String) { worker.post { discardLearning(); repository.clearAutoSamples(id); publish(state.copy(people = repository.people)) } }
     private fun day(time: Long) = Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()).toLocalDate().toString()
     private fun summaryConfigured() = settings.read().let { MobileModelEndpoint.isConfigured(it.optString("modelUrl"), it.optString("modelName"), it.optString("modelKey")) }
     fun summarize(recordId: String) { worker.post { enqueueSummary(recordId, "manual") } }

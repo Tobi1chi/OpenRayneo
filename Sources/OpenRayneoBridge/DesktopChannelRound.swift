@@ -12,7 +12,7 @@ actor DesktopChannelRound: DesktopVoiceRound {
     private let selfPerson: LocalVoicePerson?
     private let nativeWake: Bool
     /// Non-nil only for native wake rounds with self learning enabled; receives the learning outcome for the ASR record.
-    private let selfLearned: (@Sendable (String) async -> Void)?
+    private let selfLearned: (@Sendable ([Float]) async -> Void)?
     private var learnSelf: Bool { selfLearned != nil }
     private var nativeAudio: [Float] = []
     private let configuration: AssistantConfiguration
@@ -38,7 +38,7 @@ actor DesktopChannelRound: DesktopVoiceRound {
     init(configuration: AssistantConfiguration, roundID: String, inputMode: ASRAudioInputMode,
          settings: ASRPromptSettings, policy: DesktopASRPolicy, channels: Int, selectedChannel: Int? = nil,
          people: [LocalVoicePerson], selfPerson: LocalVoicePerson?, nativeWake: Bool = false,
-         selfLearned: (@Sendable (String) async -> Void)? = nil,
+         selfLearned: (@Sendable ([Float]) async -> Void)? = nil,
          finalSentence: @escaping @Sendable (Sentence) async -> Void,
          diagnostic: @escaping @Sendable (String) async -> Void, completed: @escaping @Sendable () async -> Void,
          statistics: @escaping @Sendable (ASRAudioStatistics) async -> Void,
@@ -134,8 +134,8 @@ actor DesktopChannelRound: DesktopVoiceRound {
         await deliverReady()
         if learnSelf, !nativeAudio.isEmpty {
             // Delivery is not delayed: the wake round refreshes the self profile in the background afterwards.
-            let audio = nativeAudio, report = selfLearned!; nativeAudio = []
-            await LocalVoiceSelfLearning.enqueue(audio, report: report)
+            let audio = nativeAudio, learn = selfLearned!; nativeAudio = []
+            await learn(audio)
         }
     }
     func cancel() async {

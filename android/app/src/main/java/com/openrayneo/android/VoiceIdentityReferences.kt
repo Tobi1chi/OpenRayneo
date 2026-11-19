@@ -7,7 +7,7 @@ internal fun voiceIdentityReferences(people: List<VoicePerson>, model: String): 
     val active = people.filter { it.mergedInto == null && it.model == model }
     val namedSamples = active.filter { !it.unnamed }.flatMap { it.samples }
     return active.mapNotNull { person ->
-        val samples = if (person.unnamed) person.samples.filterNot { sample -> namedSamples.any { it.contentEquals(sample) } }
+        val samples = if (person.unnamed) person.samples.filterNot { sample -> namedSamples.any { it.contentEquals(sample) } } + person.autoSamples.map { it.vector }
             else person.references
         samples.takeIf { it.isNotEmpty() }?.let { person to it }
     }

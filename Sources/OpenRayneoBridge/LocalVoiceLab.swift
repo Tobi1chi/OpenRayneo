@@ -228,7 +228,7 @@ final class LocalVoiceLab: ObservableObject {
                 for i in updated.indices where updated[i].id != person.id { updated[i].isSelf = false; updated[i].autoSamples = nil; updated[i].autoPending = nil }
             }
             updated.removeAll { $0.id == person.id }; updated.append(person)
-            try LocalVoiceStore.save(updated); people = updated; selectedPerson = person.id
+            try LocalVoiceStore.save(updated); people = updated; LocalVoiceSelfLearning.invalidate(); selectedPerson = person.id
             status = "已保存\(person.name)的\(vectors.count)个声音样本，下次分析生效"
         } catch { self.error = error.localizedDescription }
     }
@@ -236,14 +236,14 @@ final class LocalVoiceLab: ObservableObject {
         do {
             var updated = try LocalVoiceStore.load()
             if let index = updated.firstIndex(where: { $0.id == id }) { updated[index].samples = []; updated[index].autoSamples = nil; updated[index].autoPending = nil }
-            try LocalVoiceStore.save(updated); people = updated
+            try LocalVoiceStore.save(updated); people = updated; LocalVoiceSelfLearning.invalidate()
         } catch { self.error = error.localizedDescription }
     }
     func clearAutoSamples(_ id: String) {
         do {
             var updated = try LocalVoiceStore.load()
             if let index = updated.firstIndex(where: { $0.id == id }) { updated[index].autoSamples = nil; updated[index].autoPending = nil }
-            try LocalVoiceStore.save(updated); people = updated
+            try LocalVoiceStore.save(updated); people = updated; LocalVoiceSelfLearning.invalidate()
         } catch { self.error = error.localizedDescription }
     }
     func bindSpeaker() {
@@ -258,7 +258,7 @@ final class LocalVoiceLab: ObservableObject {
                 guard !person.samples.isEmpty else { throw AssistantFailure("该说话人没有可保存的独立声音片段") }
             }
             updated.removeAll { $0.id == person.id }; updated.append(person)
-            try LocalVoiceStore.save(updated); people = updated
+            try LocalVoiceStore.save(updated); people = updated; LocalVoiceSelfLearning.invalidate()
             for i in turns.indices where turns[i].speaker == bindingSpeaker {
                 turns[i].personID = person.id; turns[i].identityBasis = "manual"
             }

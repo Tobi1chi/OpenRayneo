@@ -150,15 +150,18 @@ enum PhoneReplicaReader {
             let text = (segment["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
             let speaker = segment["speaker"] as? String ?? "未知"
-            var personID = (segment["personId"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? speakerPeople[speaker]
+            let basis = segment["identityBasis"] as? String ?? ""
+            let explicitPerson = (segment["personId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            // A manual correction is authoritative, including "unknown"; only automatic segments fall back to the label map.
+            var personID = basis == "manual" ? explicitPerson : explicitPerson ?? speakerPeople[speaker]
             var visited = Set<String>()
             while let current = personID, let merged = people[current]?["mergedInto"] as? String, !merged.isEmpty, visited.insert(current).inserted {
                 personID = merged
             }
             let person = personID.flatMap { people[$0] }
-            let isSelf = person?["self"] as? Bool == true || ["channel1_default_self", "native_wake_self"].contains(segment["identityBasis"] as? String ?? "")
+            let isSelf = person?["self"] as? Bool == true || ["channel1_default_self", "native_wake_self"].contains(basis)
             let name = isSelf ? "我" : (person?["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                ?? (speaker == "未知" || speaker.isEmpty ? "未知说话人" : "说话人 \(speaker)")
+                ?? (speaker == "未知" || speaker.isEmpty || basis == "manual" ? "未知说话人" : "说话人 \(speaker)")
             names.insert(name)
             let begin = segment["beginMS"] as? Double ?? 0
             let timeline = segment["timelineAt"] as? Double ?? 0

@@ -389,9 +389,15 @@ final class DesktopAssistant: ObservableObject {
         }
         let people = try LocalVoiceStore.load()
         let selfPerson = channels == 2 || nativeWake ? try LocalVoiceStore.ensureSelf() : nil
-        var selfLearned: (@Sendable (String) async -> Void)?
+        var selfLearned: (@Sendable ([Float]) async -> Void)?
         if nativeWake && LocalVoiceSelfLearning.enabled {
-            selfLearned = { @Sendable (message: String) async in await core.recordASR("self_voice_learn", data: "round=\(id); \(message)") }
+            // Captured at round start: a manual profile change during the round discards this round's learning.
+            let generation = LocalVoiceSelfLearning.generation
+            selfLearned = { @Sendable (audio: [Float]) async in
+                await LocalVoiceSelfLearning.enqueue(audio, generation: generation) { message in
+                    await core.recordASR("self_voice_learn", data: "round=\(id); \(message)")
+                }
+            }
         }
         return try DesktopChannelRound(configuration: sessionConfiguration ?? configuration, roundID: id, inputMode: mode, settings: settings,
             policy: DesktopASRPolicy.current, channels: channels,

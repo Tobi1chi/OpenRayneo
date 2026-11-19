@@ -149,6 +149,8 @@ struct LocalVoicePanel: View {
                 }.padding(8)
             }
         }.task { model.loadPeople() }
+        // Speech captured while the toggle was off must not be learned after it turns back on.
+        .onChange(of: autoLearn) { _ in LocalVoiceSelfLearning.invalidate() }
         .onReceive(NotificationCenter.default.publisher(for: LocalVoiceSelfLearning.updated)) { _ in model.loadPeople(); lastLearnToken = UUID() }
     }
     private var lastLearn: String {

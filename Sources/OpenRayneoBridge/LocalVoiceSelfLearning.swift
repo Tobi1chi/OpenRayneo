@@ -19,7 +19,7 @@ enum LocalVoiceSelfLearning {
     static var enabled: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
     static let maxAuto = 10, maxPending = 30
 
-    struct Outcome { var accepted = 0; var bootstrapped = false; var pendingSeconds: Float = 0; var changed = true; var windows = 0 }
+    struct Outcome { var accepted = 0; var bootstrapped = false; var pendingSeconds: Float = 0; var changed = true; var windows = 0; var stale = false }
     static let updated = Notification.Name("LocalVoiceSelfLearning.updated")
     /// A native session usually stops with its round, closing the ASR journal before learning ends; the last result is kept here too.
     static let lastResultKey = "selfVoiceLastLearn"
@@ -48,11 +48,13 @@ enum LocalVoiceSelfLearning {
                 if group.allSatisfy({ LocalSpeakerEngine.cosine(pending[$0].vector, pending[index].vector) >= 0.5 }) { group.append(index) }
             }
             let seconds = group.reduce(Float(0)) { $0 + pending[$1].seconds }
-            if seconds > bestSeconds { bestSeconds = seconds; best = group.map { pending[$0] } }
+            if seconds > bestSeconds { bestSeconds = seconds; best = group.sorted().map { pending[$0] } }
         }
         // Same 10 s / 3 window bar as manual enrollment; the wearer must be the majority of the pooled wake speech.
         if bestSeconds >= 10, best.count >= 3, bestSeconds >= total * 0.5 {
-            person.autoSamples = Array(best.sorted { $0.seconds > $1.seconds }.prefix(maxAuto))
+            // Keep the longest windows but in capture order, so later FIFO eviction drops the oldest first.
+            let keep = Set(best.indices.sorted { best[$0].seconds > best[$1].seconds }.prefix(maxAuto))
+            person.autoSamples = best.indices.filter(keep.contains).map { best[$0] }
             person.autoPending = nil
             outcome.accepted = person.autoSamples!.count; outcome.bootstrapped = true
         } else {
@@ -70,13 +72,17 @@ enum LocalVoiceSelfLearning {
     /// so it serializes with the voice lab's own profile writes.
     /// Rounds learn one after another: each pass loads its own models, and back-to-back wake rounds must not stack them.
     @MainActor private static var last: Task<Void, Never>?
-    @MainActor static func enqueue(_ audio: [Float], report: @escaping @Sendable (String) async -> Void) {
+    /// Bumped by every manual profile change (enroll, bind, remove, clear); a round captured before it must not write.
+    @MainActor private(set) static var generation = 0
+    @MainActor static func invalidate() { generation += 1 }
+    @MainActor static func enqueue(_ audio: [Float], generation: Int, report: @escaping @Sendable (String) async -> Void) {
         let previous = last
         last = Task.detached(priority: .utility) {
             await previous?.value
             do {
-                let outcome = try await learn(from: audio)
-                let summary = "audioSeconds=\(audio.count / 16000); windows=\(outcome.windows); accepted=\(outcome.accepted); bootstrapped=\(outcome.bootstrapped); pendingSeconds=\(Int(outcome.pendingSeconds)); saved=\(outcome.changed)"
+                let outcome = try await learn(from: audio, generation: generation)
+                let summary = outcome.stale ? "skipped=profile_changed_or_disabled"
+                    : "audioSeconds=\(audio.count / 16000); windows=\(outcome.windows); accepted=\(outcome.accepted); bootstrapped=\(outcome.bootstrapped); pendingSeconds=\(Int(outcome.pendingSeconds)); saved=\(outcome.changed)"
                 await finished(summary, at: Date(), report: report)
             } catch { await finished("failed=\(error.localizedDescription)", at: Date(), report: report) }
         }
@@ -89,7 +95,7 @@ enum LocalVoiceSelfLearning {
         }
         await report(summary)
     }
-    static func learn(from audio: [Float]) async throws -> Outcome {
+    static func learn(from audio: [Float], generation: Int) async throws -> Outcome {
         let engine = try LocalSpeakerEngine(enrolling: true, people: [], threshold: LocalSpeakerEngine.defaultThreshold)
         // Enrollment mode keeps a bounded rolling window, so collect windows as they appear.
         var collected: [UUID: LocalSpeakerTurn] = [:]
@@ -100,6 +106,7 @@ enum LocalVoiceSelfLearning {
         let windows = collected.values.sorted { $0.beginMS < $1.beginMS }.compactMap { turn in turn.embedding.map { (vector: $0, seconds: Float(turn.endMS - turn.beginMS) / 1000) } }
         guard !windows.isEmpty else { return Outcome(changed: false) }
         return try await MainActor.run {
+            guard enabled, generation == Self.generation else { return Outcome(changed: false, stale: true) }
             var people = try LocalVoiceStore.load()
             let index: Int
             if let existing = people.firstIndex(where: \.isSelf) { index = existing }

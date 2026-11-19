@@ -16,7 +16,15 @@ import android.view.Surface
 import android.view.TextureView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -86,11 +94,14 @@ internal fun GlassesArtwork(modifier: Modifier = Modifier, pose: GlassesPose = G
                 )
             }
         }
-        AndroidView(
-            factory = { GlassesStageView(it) },
+        // Devices whose GLES driver rejects Filament (engine or swap chain) keep a static mark instead of failing the screen.
+        var failed by remember { mutableStateOf(false) }
+        if (failed) Image(painterResource(R.drawable.ic_brand_mark), null, Modifier.align(Alignment.Center).fillMaxSize(0.45f))
+        else AndroidView(
+            factory = { context -> runCatching<android.view.View> { GlassesStageView(context) { failed = true } }.getOrElse { failed = true; android.view.View(context) } },
             modifier = Modifier.matchParentSize(),
-            update = { it.pose = pose },
-            onRelease = { it.release() },
+            update = { (it as? GlassesStageView)?.pose = pose },
+            onRelease = { (it as? GlassesStageView)?.release() },
         )
     }
 }
@@ -159,7 +170,7 @@ private object GlassesMotion {
 }
 
 @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
-private class GlassesStageView(context: Context) : TextureView(context), Choreographer.FrameCallback {
+private class GlassesStageView(context: Context, private val onFailed: () -> Unit) : TextureView(context), Choreographer.FrameCallback {
     /** The first pose is shown directly, so recreating the view does not replay the unfold; later changes animate. */
     var pose = GlassesPose.Resting
         set(value) {
@@ -257,8 +268,8 @@ private class GlassesStageView(context: Context) : TextureView(context), Choreog
         uiHelper.renderCallback = object : UiHelper.RendererCallback {
             override fun onNativeWindowChanged(surface: Surface) {
                 swapChain?.let { engine.destroySwapChain(it) }
-                swapChain = engine.createSwapChain(surface, uiHelper.swapChainFlags)
-                wake()
+                swapChain = runCatching { engine.createSwapChain(surface, uiHelper.swapChainFlags) }.getOrNull()
+                if (swapChain == null) post(onFailed) else wake()
             }
 
             override fun onDetachedFromSurface() {

@@ -9,7 +9,7 @@
 - DSH：[插件0.1.8](../android/app/build/outputs/candidates/android37-1.2.0-beta.4/openrayneo-dsh-0.1.8.tgz)。Android36及之后沿用该版插件。
 - Android回退：[37 release](../android/app/build/outputs/candidates/android37-1.2.0-beta.4/OpenRayneo-v37-release.apk)、[36 release](../android/app/build/outputs/candidates/android36-1.2.0-beta.3/OpenRayneo-v36-release.apk)。同签名覆盖安装保留配置与记录，私有库与Keystore一起保留。
 
-这些是开发机产物；当前源码构建以本页命令为准，仓库不提交安装包、模型下载物或私钥。
+正式下载见 GitHub Release `v1.2.0-beta.5`（Mac arm64 zip、Android arm64 release APK）。本页其余路径是开发机产物，构建后可能已清理；当前源码构建以本页命令为准，仓库不提交安装包、模型下载物或私钥。
 
 ## 构建
 
