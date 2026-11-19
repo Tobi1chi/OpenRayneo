@@ -565,7 +565,8 @@ final class DesktopBridge: ObservableObject {
     func startAssistantRealtime(duration: Int, channel: Int, sampleRate: Int = 16000, stereo: Bool = false) async throws -> String {
         try await ensureConnected()
         try await stopCurrent()
-        let response = try await request("/v1/assistant-audio/start", body: ["duration": duration, "channel": channel, "sample_rate": sampleRate, "pcm_layout": stereo ? "stereo" : "mono"])
+        let response = try await request("/v1/assistant-audio/start", body: ["duration": duration, "channel": channel, "sample_rate": sampleRate, "pcm_layout": stereo ? "stereo" : "mono",
+            "save_latest": UserDefaults.standard.bool(forKey: RealtimeRecentRecordingSettings.key)])
         activeSession = .assistantAudio
         guard let sid = response["sid"] as? String else { throw DesktopError(message: "实时收音未返回会话标识") }
         return sid

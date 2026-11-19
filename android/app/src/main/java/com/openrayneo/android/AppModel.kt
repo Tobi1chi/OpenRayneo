@@ -267,7 +267,7 @@ internal class AppModel(application: Application) : AndroidViewModel(application
     companion object {
         val configurationKeys = listOf("modelUrl", "modelName", "modelKey", "mobileAgentBackend", "localAgentPort", "codexUrl", "codexCwd", "codexToken",
             "asrKey", "asrUrl", "asrModel", "decisionKey", "decisionUrl", "decisionModel", "nativeAutoAnswer", "audioChannel",
-            "speakerThreshold", "voiceRoutingPrompt", "memoryPrompt", "memoryAutoSummary", "answerClearSeconds", "saveMeetingAudio")
+            "speakerThreshold", "selfVoiceAutoLearn", "voiceRoutingPrompt", "memoryPrompt", "memoryAutoSummary", "answerClearSeconds", "saveMeetingAudio")
     }
 
     fun send(source: AnswerSource) = attempt {

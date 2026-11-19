@@ -10,16 +10,18 @@ actor ChannelSpeakerProcessor {
     let channelPolicy: String
     private let engines: [LocalSpeakerEngine]
 
+    /// `nativeWake`: user decision 2026-11-20 — only the wearer says the wake word, so a native round is the wearer's (no voiceprint).
     init(channels: Int, people: [LocalVoicePerson], threshold: Float, enrolling: Bool = false,
-         selfPerson: LocalVoicePerson? = nil, selectedChannel: Int? = nil, offlineDiarization: Bool = false) throws {
+         selfPerson: LocalVoicePerson? = nil, selectedChannel: Int? = nil, offlineDiarization: Bool = false, nativeWake: Bool = false) throws {
         self.channels = channels
-        let dual = channels == 2 && !enrolling && selectedChannel == nil
-        guard !dual || selfPerson != nil else { throw AssistantFailure("双路策略需要稳定的本人身份") }
-        channelPolicy = dual ? "dual_channel1_self" : selectedChannel != nil ? "legacy_selected_mono" : "full_speaker"
+        let dual = channels == 2 && !enrolling && selectedChannel == nil && !nativeWake
+        let native = nativeWake && !enrolling
+        guard !(dual || native) || selfPerson != nil else { throw AssistantFailure("默认本人策略需要稳定的本人身份") }
+        channelPolicy = native ? "native_wake_self" : dual ? "dual_channel1_self" : selectedChannel != nil ? "legacy_selected_mono" : "full_speaker"
         engines = try (0..<channels).map { lane in
             try LocalSpeakerEngine(enrolling: enrolling, people: people, threshold: threshold,
-                sourceChannel: selectedChannel ?? lane + 1, defaultSelfID: dual && lane == 0 ? selfPerson?.id : nil,
-                offlineDiarization: offlineDiarization)
+                sourceChannel: selectedChannel ?? lane + 1, defaultSelfID: (dual || native) && lane == 0 ? selfPerson?.id : nil,
+                defaultSelfBasis: native ? "native_wake_self" : "channel1_default_self", offlineDiarization: offlineDiarization)
         }
     }
     func accept(_ lanes: [[Float]]) async -> [LocalSpeakerTurn] {

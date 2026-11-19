@@ -17,7 +17,7 @@ import org.json.JSONObject
 @Composable
 internal fun VoiceSettingsScreen(model: AppModel, actions: UiActions) {
     val drafts = model.formDrafts
-    val voiceKeys = listOf("asrKey", "asrUrl", "asrModel", "nativeAutoAnswer", "audioChannel", "speakerThreshold", "memoryPrompt", "memoryAutoSummary", "answerClearSeconds")
+    val voiceKeys = listOf("asrKey", "asrUrl", "asrModel", "nativeAutoAnswer", "audioChannel", "speakerThreshold", "selfVoiceAutoLearn", "memoryPrompt", "memoryAutoSummary", "answerClearSeconds")
     var error by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("语音与记忆配置", style = MaterialTheme.typography.headlineSmall)
@@ -39,7 +39,10 @@ internal fun VoiceSettingsScreen(model: AppModel, actions: UiActions) {
         SectionLabel("声道与识别判断")
         Note("正常双通道同时处理：通道1默认本人，通道2独立识别；全天智记与其他单声道全量识别说话人。此选项仅用于主动登记，不改变记录策略。")
         VoiceField(model, "audioChannel", "登记诊断声道：0/1通道一、2通道二", "0")
-        VoiceField(model, "speakerThreshold", "声音匹配阈值（尚待你的声音校准）", "0.7")
+        VoiceField(model, "speakerThreshold", "声音匹配阈值（留空用默认）", SpeakerEngine.DEFAULT_THRESHOLD.toString())
+        var autoLearn by remember(model.config) { mutableStateOf(model.config.optString(SelfVoiceLearning.KEY, "true") != "false") }
+        Row { Checkbox(autoLearn, { autoLearn = it; drafts[SelfVoiceLearning.KEY] = it.toString() }); Text("“小雷小雷”唤醒轮自动更新我的声音") }
+        Note("唤醒轮按策略默认是你；每轮结束后在手机本机提取声音。还没有档案时累计一致人声满10秒、3段后自动建档；已有档案后只收与档案相似度≥0.50的片段，最多保留10个自动样本，不替换手动登记样本。手机与Mac档案各自独立。下次开始收音生效。")
         SectionLabel("记录总结")
         VoiceField(model, "modelUrl", "总结模型服务地址")
         VoiceField(model, "modelName", "总结模型名称")
@@ -114,7 +117,7 @@ internal fun VoiceProfilesScreen(model: AppModel) {
             ToolButton(onClick = { model.service().conversations.saveEnrollment(self?.name ?: "我", true, self?.contactUri, confirmAllSamples = confirmed) }, enabled = !state.stopping && (state.enrollmentReady || state.enrollmentCanConfirm && confirmed)) { Text("保存我的声音") }
             TextButton(onClick = { model.service().conversations.stop() }) { Text("停止登记") }
         } else ToolButton(onClick = { model.attempt { model.service().startConversation(ConversationMode.ENROLL, ConversationSource.REALTIME, self) } },
-            enabled = !state.running && state.modelReady && model.state.glasses.link.phase == LinkPhase.FULL) { Text(if (self?.samples?.isNotEmpty() == true) "重新登记我的声音" else "登记我的声音") }
+            enabled = !state.running && state.modelReady && model.state.glasses.link.phase == LinkPhase.FULL) { Text(if (self?.references?.isNotEmpty() == true) "重新登记我的声音" else "登记我的声音") }
         Note(state.status)
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         state.people.filter { it.mergedInto == null }.forEach { person ->
@@ -122,7 +125,13 @@ internal fun VoiceProfilesScreen(model: AppModel) {
                 Column(Modifier.padding(16.dp)) {
                     Text(person.name + if (person.self) " · 我" else "", style = MaterialTheme.typography.titleMedium)
                     if (person.unnamed) Note("自动建立 · 待命名")
-                    Note(if (person.samples.isEmpty()) "未登记声音" else "已登记${person.samples.size}个声音样本")
+                    Note(when {
+                        person.references.isEmpty() && person.autoPending.isEmpty() -> "未登记声音"
+                        else -> listOfNotNull("手动${person.samples.size}个",
+                            if (person.self || person.autoSamples.isNotEmpty()) "自动${person.autoSamples.size}个" + (person.autoSamples.maxOfOrNull { it.at }
+                                ?.let { "（" + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it)) + "）" } ?: "") else null,
+                            person.autoPending.sumOf { it.seconds.toDouble() }.takeIf { it > 0 }?.let { "待建档${it.toInt()}秒" }).joinToString(" · ", postfix = "声音样本")
+                    })
                     if (person.contactUri != null) Note("已关联选定联系人")
                     Row {
                         TextButton(onClick = { rename = person }) { Text("命名") }
@@ -130,7 +139,8 @@ internal fun VoiceProfilesScreen(model: AppModel) {
                         TextButton(onClick = { split = person }) { Text("拆分") }
                     }
                     TextButton(onClick = { history = person }) { Text("选择历史发言更正") }
-                    if (person.samples.isNotEmpty()) TextButton(onClick = { model.service().conversations.removeVoice(person.id) }) { Text("移除声音，保留人物记录") }
+                    if (person.autoSamples.isNotEmpty() || person.autoPending.isNotEmpty()) TextButton(onClick = { model.service().conversations.clearAutoSamples(person.id) }) { Text("清除自动样本") }
+                    if (person.references.isNotEmpty() || person.autoPending.isNotEmpty()) TextButton(onClick = { model.service().conversations.removeVoice(person.id) }) { Text("移除声音，保留人物记录") }
                 }
             }
         }

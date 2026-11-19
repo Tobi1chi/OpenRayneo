@@ -11,7 +11,11 @@ import kotlin.math.sqrt
 /** All native inference runs on the conversation worker, never on the decoder or UI thread. */
 internal class SpeakerEngine(context: Context, private val people: () -> List<VoicePerson>,
     private val threshold: () -> Float, private val classified: (Long, Long) -> Unit) {
-    companion object { const val MODEL = "campplus-zh-16k-common/sherpa-2.0.1" }
+    companion object {
+        const val MODEL = "campplus-zh-16k-common/sherpa-2.0.1"
+        // Top-3 mean against <=3 s enrollment windows; same-speaker CAM++ queries measure ~0.56-0.64, others <=0.20.
+        const val DEFAULT_THRESHOLD = 0.5f
+    }
     data class Evidence(val beginMS: Long, val endMS: Long, val speaker: String,
                         val personId: String?, val score: Float?, val mixed: Boolean, val embedding: FloatArray?)
     data class Assignment(val speaker: String = "未知", val personId: String? = null,

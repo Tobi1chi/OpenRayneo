@@ -10,6 +10,11 @@ actor DesktopChannelRound: DesktopVoiceRound {
     private let channels: Int
     private let selectedChannel: Int?
     private let selfPerson: LocalVoicePerson?
+    private let nativeWake: Bool
+    /// Non-nil only for native wake rounds with self learning enabled; receives the learning outcome for the ASR record.
+    private let selfLearned: (@Sendable (String) async -> Void)?
+    private var learnSelf: Bool { selfLearned != nil }
+    private var nativeAudio: [Float] = []
     private let configuration: AssistantConfiguration
     private let mode: ASRAudioInputMode
     private let settings: ASRPromptSettings
@@ -32,14 +37,17 @@ actor DesktopChannelRound: DesktopVoiceRound {
 
     init(configuration: AssistantConfiguration, roundID: String, inputMode: ASRAudioInputMode,
          settings: ASRPromptSettings, policy: DesktopASRPolicy, channels: Int, selectedChannel: Int? = nil,
-         people: [LocalVoicePerson], selfPerson: LocalVoicePerson?,
+         people: [LocalVoicePerson], selfPerson: LocalVoicePerson?, nativeWake: Bool = false,
+         selfLearned: (@Sendable (String) async -> Void)? = nil,
          finalSentence: @escaping @Sendable (Sentence) async -> Void,
          diagnostic: @escaping @Sendable (String) async -> Void, completed: @escaping @Sendable () async -> Void,
          statistics: @escaping @Sendable (ASRAudioStatistics) async -> Void,
          backendChanged: @escaping @Sendable (String) async -> Void) throws {
         self.configuration = configuration; id = roundID; mode = inputMode; self.settings = settings; self.policy = policy
-        self.channels = channels; self.selectedChannel = selectedChannel; self.selfPerson = selfPerson
-        processor = try ChannelSpeakerProcessor(channels: channels, people: people, threshold: 0.7, selfPerson: selfPerson, selectedChannel: selectedChannel)
+        self.channels = channels; self.selectedChannel = selectedChannel; self.selfPerson = selfPerson; self.nativeWake = nativeWake
+        self.selfLearned = nativeWake ? selfLearned : nil
+        processor = try ChannelSpeakerProcessor(channels: channels, people: people, threshold: LocalSpeakerEngine.defaultThreshold, selfPerson: selfPerson,
+            selectedChannel: selectedChannel, nativeWake: nativeWake)
         sentence = finalSentence; self.diagnostic = diagnostic; self.completed = completed
         self.statistics = statistics; self.backendChanged = backendChanged
     }
@@ -55,6 +63,7 @@ actor DesktopChannelRound: DesktopVoiceRound {
     }
     func appendPCM(_ bytes: Data) async throws {
         let samples = LocalVoiceAudioReader.decodePCM16Channels(bytes, channels: channels)
+        if learnSelf { nativeAudio.append(contentsOf: samples[0]) }
         turns = await processor.accept(samples)
         analysisWatermarks = await processor.analyzedThroughMS()
         for lane in lanes.indices { try await lanes[lane].appendPCM(LocalVoiceAudioReader.encodePCM16([samples[lane]])) }
@@ -82,7 +91,7 @@ actor DesktopChannelRound: DesktopVoiceRound {
                 let channel = value.sourceChannel ?? 1
                 let lane = selectedChannel != nil ? 0 : channel - 1
                 let analyzed = analysisWatermarks.indices.contains(lane) ? analysisWatermarks[lane] : 0
-                let defaultSelf = channels == 2 && channel == 1 && selectedChannel == nil
+                let defaultSelf = selfLane(channel)
                 let complete = final || defaultSelf || (value.endMS.map { Int64($0) <= analyzed } ?? false)
                 if blocked.contains(channel) || !complete { waiting.append(value); blocked.insert(channel) }
                 else { ready.append(value) }
@@ -96,8 +105,8 @@ actor DesktopChannelRound: DesktopVoiceRound {
                 }
                 value.speakerTurns = overlap.map { SpeakerAttribution(beginMS: $0.beginMS, endMS: $0.endMS, sourceChannel: $0.sourceChannel,
                     personId: $0.personID, speaker: $0.speaker, identityBasis: $0.identityBasis, mixed: $0.mixed) }
-                if channels == 2, value.sourceChannel == 1, selectedChannel == nil {
-                    value.personId = selfPerson?.id; value.speaker = "我"; value.identityBasis = "channel1_default_self"
+                if selfLane(value.sourceChannel ?? 1) {
+                    value.personId = selfPerson?.id; value.speaker = "我"; value.identityBasis = nativeWake ? "native_wake_self" : "channel1_default_self"
                 } else {
                     let people = Set(overlap.compactMap(\.personID))
                     let mixed = overlap.contains(where: \.mixed)
@@ -113,6 +122,9 @@ actor DesktopChannelRound: DesktopVoiceRound {
             finished = true; await completed()
         }
     }
+    private func selfLane(_ channel: Int) -> Bool {
+        channel == 1 && (nativeWake || channels == 2 && selectedChannel == nil)
+    }
     func finish() async {
         guard !finishing, !finished else { return }; finishing = true
         if lanes.isEmpty { finished = true; await completed(); return }
@@ -120,11 +132,16 @@ actor DesktopChannelRound: DesktopVoiceRound {
         analysisWatermarks = await processor.analyzedThroughMS()
         for lane in lanes { await lane.finish() }
         await deliverReady()
+        if learnSelf, !nativeAudio.isEmpty {
+            // Delivery is not delayed: the wake round refreshes the self profile in the background afterwards.
+            let audio = nativeAudio, report = selfLearned!; nativeAudio = []
+            await LocalVoiceSelfLearning.enqueue(audio, report: report)
+        }
     }
     func cancel() async {
         guard !finished else { return }; finished = true
         for lane in lanes { await lane.cancel() }
-        pending = []; await completed()
+        pending = []; nativeAudio = []; await completed()
     }
     func isFinished() -> Bool { finished }
     var maximumFinishWaitSeconds: Int { 180 }

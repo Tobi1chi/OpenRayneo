@@ -175,7 +175,7 @@ private fun SpeechRow(segment: SpeechSegment, people: List<VoicePerson>, record:
             val clock = SimpleDateFormat("HH:mm:ss", Locale.CHINA)
             val time = start?.let { clock.format(Date(it)) + (end?.let { until -> "–${clock.format(Date(until))}" } ?: "") } ?: formatOffset(segment.beginMS)
             Note((if (segment.timeBasis == "legacy-estimate") "历史时间估计" else "手机接收时间") + if (segment.processingMode == "backfill") " · 历史音频补齐" else "")
-            Note("通道${segment.sourceChannel} · " + (when (segment.identityBasis) { "channel1_default_self" -> "通道1默认本人"; "voiceprint" -> "声纹匹配"; "manual" -> "人工更正"; "mixed" -> "混合识别"; else -> "身份待识别" }))
+            Note("通道${segment.sourceChannel} · " + (when (segment.identityBasis) { "channel1_default_self" -> "通道1默认本人"; "native_wake_self" -> "唤醒默认本人"; "voiceprint" -> "声纹匹配"; "manual" -> "人工更正"; "mixed" -> "混合识别"; else -> "身份待识别" }))
             Note("$time · $name${if (segment.mixed) " · 重叠或混合" else if (!segment.stable) " · 暂定" else ""}")
             if (segment.candidates.isNotEmpty()) {
                 Note("声纹候选 · " + segment.candidates.joinToString(" · ") { match ->

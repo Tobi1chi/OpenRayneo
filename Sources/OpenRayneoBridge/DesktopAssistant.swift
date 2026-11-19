@@ -346,7 +346,8 @@ final class DesktopAssistant: ObservableObject {
             case "begin":
                 captureRounds.insert(id)
                 let language = event["language"] as? String
-                let round = try await makeRound(id, language: language, channels: event["channels"] as? Int ?? 1)
+                // Only live native capture is a wake round; file imports keep full speaker analysis.
+                let round = try await makeRound(id, language: language, channels: event["channels"] as? Int ?? 1, nativeWake: activeSource == .native)
                 rounds[id] = round
                 asrStatus = language.map { "ASR \($0) 新流已就绪，等待音频；旧流继续排空" }
                     ?? "音频会话已就绪，等待眼镜音频包"
@@ -371,7 +372,8 @@ final class DesktopAssistant: ObservableObject {
         return data["drained"] as? Bool == true
     }
 
-    private func makeRound(_ id: String, inputMode: ASRAudioInputMode? = nil, language: String? = nil, channels: Int = 1, selectedChannel: Int? = nil) async throws -> any DesktopVoiceRound {
+    private func makeRound(_ id: String, inputMode: ASRAudioInputMode? = nil, language: String? = nil, channels: Int = 1, selectedChannel: Int? = nil,
+                           nativeWake: Bool = false) async throws -> any DesktopVoiceRound {
         let core = engine!, generation = sessionID, sequence = sentenceSequence!
         await sequence.begin(id)
         let mode = inputMode ?? (activeSource == .lifeLog ? .buffered : .realtime)
@@ -386,11 +388,17 @@ final class DesktopAssistant: ObservableObject {
             await core.recordASR("asr_configuration", data: "round=\(id); profile=\(profile.versionLabel); settings=\(String(decoding: data, as: UTF8.self))")
         }
         let people = try LocalVoiceStore.load()
-        let selfPerson = channels == 2 ? try LocalVoiceStore.ensureSelf() : nil
+        let selfPerson = channels == 2 || nativeWake ? try LocalVoiceStore.ensureSelf() : nil
+        var selfLearned: (@Sendable (String) async -> Void)?
+        if nativeWake && LocalVoiceSelfLearning.enabled {
+            selfLearned = { @Sendable (message: String) async in await core.recordASR("self_voice_learn", data: "round=\(id); \(message)") }
+        }
         return try DesktopChannelRound(configuration: sessionConfiguration ?? configuration, roundID: id, inputMode: mode, settings: settings,
             policy: DesktopASRPolicy.current, channels: channels,
             selectedChannel: selectedChannel ?? (activeSource == .realtime && microphoneChannel != 3 ? max(1, microphoneChannel) : nil),
-            people: people, selfPerson: selfPerson, finalSentence: { sentence in
+            people: people, selfPerson: selfPerson, nativeWake: nativeWake,
+            selfLearned: selfLearned,
+            finalSentence: { sentence in
             await sequence.accept(sentence)
         }, diagnostic: { [weak self] message in
             await core.recordASR("asr_error", data: message)

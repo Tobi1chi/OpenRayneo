@@ -510,7 +510,7 @@ internal class BridgeService : Service() {
             method == "GET" && path in setOf("/v1/records", "/v1/conversations") || method == "POST" && path == "/v1/records/query" ->
                 JSONObject().put("items", repository.query(args.optLong("from", Long.MIN_VALUE), args.optLong("to", Long.MAX_VALUE), args.optString("recordId"), args.optString("text")))
             method == "GET" && path.startsWith("/v1/conversations/") -> JSONObject().put("items", repository.query(id = path.substringAfterLast('/')))
-            method == "GET" && path == "/v1/records/people" -> JSONObject().put("items", org.json.JSONArray(repository.people.map { it.json().apply { remove("samples") } }))
+            method == "GET" && path == "/v1/records/people" -> JSONObject().put("items", org.json.JSONArray(repository.people.map { it.publicJson() }))
             method == "POST" && path == "/v1/records/derived" -> {
                 val item = RecordDerived.parse(body)
                 check(repository.applyDerived(item)) { "记录不存在" }; conversations.refreshRecords()

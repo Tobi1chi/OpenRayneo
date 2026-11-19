@@ -34,12 +34,22 @@ internal class ConversationRepository(context: Context) {
     private fun writePeople() = write("people", JSONObject().put("people", JSONArray(people.map { it.json() })))
     @Synchronized fun savePerson(person: VoicePerson) {
         val old = people.firstOrNull { it.id == person.id }
-        val updated = person.copy(revision = (old?.revision ?: 0) + 1, changeSequence = ++sequence)
-        people = people.filter { it.id != person.id }.map { if (person.self && it.self) it.copy(self = false,
+        // Automatic samples are the wearer's voice and only live on the current self.
+        val updated = person.copy(revision = (old?.revision ?: 0) + 1, changeSequence = ++sequence,
+            autoSamples = if (person.self) person.autoSamples else emptyList(), autoPending = if (person.self) person.autoPending else emptyList())
+        // Automatic samples belong to whoever is self; a replaced self must not keep them.
+        people = people.filter { it.id != person.id }.map { if (person.self && it.self) it.copy(self = false, autoSamples = emptyList(), autoPending = emptyList(),
             revision = it.revision + 1, changeSequence = ++sequence) else it } + updated
         writePeople()
     }
-    @Synchronized fun removeVoice(personId: String) { people.firstOrNull { it.id == personId }?.let { savePerson(it.copy(samples = emptyList())) } }
+    @Synchronized fun removeVoice(personId: String) { people.firstOrNull { it.id == personId }?.let { savePerson(it.copy(samples = emptyList(), autoSamples = emptyList(), autoPending = emptyList())) } }
+    @Synchronized fun clearAutoSamples(personId: String) { people.firstOrNull { it.id == personId }?.let { savePerson(it.copy(autoSamples = emptyList(), autoPending = emptyList())) } }
+    @Synchronized fun learnSelf(windows: List<Pair<FloatArray, Float>>): SelfVoiceLearning.Outcome {
+        val self = ensureSelf()
+        val (updated, outcome) = SelfVoiceLearning.apply(self, windows)
+        if (updated !== self) savePerson(updated)
+        return outcome
+    }
     @Synchronized fun ensureSelf(): VoicePerson = people.firstOrNull { it.self && it.mergedInto == null } ?: VoicePerson(name = "我", self = true).let {
         savePerson(it); people.first { person -> person.id == it.id }
     }
@@ -102,8 +112,10 @@ internal class ConversationRepository(context: Context) {
     @Synchronized fun mergePeople(sourceIds: Set<String>, targetId: String, recordIds: Set<String>) {
         val target = people.first { it.id == targetId }
         val sources = people.filter { it.id in sourceIds && it.id != targetId }
-        savePerson(target.copy(samples = (target.samples + sources.flatMap { it.samples }).takeLast(20), self = target.self || sources.any { it.self }))
-        sources.forEach { savePerson(it.copy(mergedInto = targetId, self = false)) }
+        val self = target.self || sources.any { it.self }
+        val auto = if (self) (target.autoSamples + sources.flatMap { it.autoSamples }).sortedBy { it.at }.takeLast(SelfVoiceLearning.MAX_AUTO) else emptyList()
+        sources.forEach { savePerson(it.copy(mergedInto = targetId, self = false, autoSamples = emptyList(), autoPending = emptyList())) }
+        savePerson(people.first { it.id == targetId }.copy(samples = (target.samples + sources.flatMap { it.samples }).takeLast(20), self = self, autoSamples = auto))
         records.filter { it.id in recordIds }.forEach { row ->
             correctSpeaker(row.id, row.segments.filter { it.personId in sourceIds }.map { it.id }.toSet(), targetId)
         }
@@ -121,7 +133,7 @@ internal class ConversationRepository(context: Context) {
     @Synchronized fun exchange(cursor: Long, limit: Int, incoming: List<RecordDerived>): JSONObject {
         val accepted = incoming.filter { applyDerived(it) }.map { it.id }
         val changes = (records.filter { it.changeSequence > cursor }.map { it.changeSequence to it.json().apply { remove("speakerSamples") } } +
-            people.filter { it.changeSequence > cursor }.map { it.changeSequence to it.json().apply { remove("samples") } }).sortedBy { it.first }
+            people.filter { it.changeSequence > cursor }.map { it.changeSequence to it.publicJson() }).sortedBy { it.first }
         val page = changes.take(limit.coerceIn(1, 100))
         return JSONObject().put("protocolVersion", 1).put("cursor", page.lastOrNull()?.first ?: cursor).put("hasMore", page.size < changes.size)
             .put("records", JSONArray(page.filter { it.second.has("segments") }.map { it.second }))

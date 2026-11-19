@@ -3,10 +3,13 @@
 
 import Foundation
 
-/// Automatically retains the most recent native capture, independently of ASR acknowledgement.
+/// Automatically retains the most recent capture (native mono, or opt-in realtime dual-mic PCM),
+/// independently of ASR acknowledgement. Each instance owns one directory and file prefix.
 final class NativeDiagnosticRecording {
     private final class Capture {
         let id: String
+        let sampleRate: Int
+        let channels: Int
         var state = "capturing"
         var accepting = true
         var receivedBytes = 0
@@ -18,19 +21,20 @@ final class NativeDiagnosticRecording {
         // Accessed only on the serial writer queue.
         var writer: WAVRecording?
         var stagingURL: URL?
-        init(id: String) { self.id = id }
+        init(id: String, sampleRate: Int, channels: Int) { self.id = id; self.sampleRate = sampleRate; self.channels = channels }
     }
     private let lock = NSLock()
     private let writerQueue = DispatchQueue(label: "openrayneo.native-recent-writer")
-    private let directory: URL
+    let directory: URL
+    private let namePrefix: String
     private var current: Capture?
     private var latest: [String: Any]?
     private var storageError: String?
     private var cleanupError: String?
 
     init(directory: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("OpenRayneo/NativeDiagnostics", isDirectory: true)) {
-        self.directory = directory
+        .appendingPathComponent("OpenRayneo/NativeDiagnostics", isDirectory: true), namePrefix: String = "native-recent") {
+        self.directory = directory; self.namePrefix = namePrefix
         let index = directory.appendingPathComponent("latest.json")
         if FileManager.default.fileExists(atPath: index.path) {
             do {
@@ -54,16 +58,16 @@ final class NativeDiagnosticRecording {
         return result
     }
 
-    func begin(captureID: String) {
+    func begin(captureID: String, sampleRate: Int = 16000, channels: Int = 1) {
         lock.lock(); defer { lock.unlock() }
         if let old = current, old.accepting { finishLocked(old, reason: "superseded_by_capture", incomplete: true) }
-        let capture = Capture(id: captureID)
+        let capture = Capture(id: captureID, sampleRate: sampleRate, channels: channels)
         current = capture
         writerQueue.async { [self] in
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                     attributes: [.posixPermissions: 0o700])
-                let writer = try WAVRecording(sampleRate: 16000, channels: 1, directory: directory, namePrefix: "native-recent")
+                let writer = try WAVRecording(sampleRate: capture.sampleRate, channels: capture.channels, directory: directory, namePrefix: namePrefix)
                 capture.writer = writer; capture.stagingURL = writer.url
             } catch { fail(capture, error) }
         }
@@ -125,7 +129,7 @@ final class NativeDiagnosticRecording {
             lock.unlock()
             do {
                 for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-                    where url.lastPathComponent.hasPrefix("native-recent-") && url.pathExtension == "wav" &&
+                    where url.lastPathComponent.hasPrefix("\(namePrefix)-") && url.pathExtension == "wav" &&
                         url.lastPathComponent != output.lastPathComponent {
                     try FileManager.default.trashItem(at: url, resultingItemURL: nil)
                 }
@@ -148,11 +152,12 @@ final class NativeDiagnosticRecording {
     }
 
     private func snapshot(_ capture: Capture) -> [String: Any] {
-        ["state": capture.state, "captureID": capture.id, "path": capture.path as Any? ?? NSNull(),
-         "sampleRate": 16000, "channels": 1, "bitsPerSample": 16,
-         "frames": capture.writtenBytes / 2, "receivedFrames": capture.receivedBytes / 2,
+        let frameBytes = 2 * capture.channels
+        return ["state": capture.state, "captureID": capture.id, "path": capture.path as Any? ?? NSNull(),
+         "sampleRate": capture.sampleRate, "channels": capture.channels, "bitsPerSample": 16,
+         "frames": capture.writtenBytes / frameBytes, "receivedFrames": capture.receivedBytes / frameBytes,
          "pcmBytes": capture.writtenBytes, "wavBytes": capture.state == "ready" ? capture.writtenBytes + 44 : 0,
-         "durationSeconds": Double(capture.writtenBytes) / 32000,
+         "durationSeconds": Double(capture.writtenBytes) / Double(capture.sampleRate * frameBytes),
          "finalized": capture.state == "ready", "complete": capture.state == "ready" && !capture.incomplete,
          "incomplete": capture.incomplete, "reason": capture.reason, "error": capture.error as Any? ?? NSNull()]
     }

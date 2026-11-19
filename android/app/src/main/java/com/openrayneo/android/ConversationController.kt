@@ -52,6 +52,9 @@ internal class ConversationController(private val context: Context, private val 
     private var enrollmentChannel = 1
     private var resamplers = List(2) { ConversationAudio() }
     private val engines = mutableMapOf<Int, SpeakerEngine>()
+    // Native wake channel 1 skips voiceprint matching; this enrollment-mode engine only harvests windows to refresh the self profile.
+    private var learner: SpeakerEngine? = null
+    private val learnedWindows = mutableListOf<Pair<FloatArray, Float>>()
     private val activeASR = mutableMapOf<Int, ConversationASR>()
     private data class Round(val channel: Int, val baseFrame: Long, var endFrame: Long? = null)
     private val rounds = linkedMapOf<ConversationASR, Round>()
@@ -83,7 +86,7 @@ internal class ConversationController(private val context: Context, private val 
     private val summaryJobs = ArrayDeque<Triple<String, String, String>>()
     private fun engine(channel: Int): SpeakerEngine = engines.getOrPut(channel) {
         SpeakerEngine(context, { repository.people.filter { it.mergedInto == null } },
-            { settings.read().optDouble("speakerThreshold", 0.7).toFloat() }, { begin, end -> classified(channel, begin, end) })
+            { settings.read().optDouble("speakerThreshold", SpeakerEngine.DEFAULT_THRESHOLD.toDouble()).toFloat() }, { begin, end -> classified(channel, begin, end) })
     }
     private fun fixedSelf(channel: Int) = SpeakerChannelPolicy.fixedSelf(record!!.channelPolicy, channel) && state.mode != ConversationMode.ENROLL
     private fun lanes() = 1..(record?.audioChannels ?: 1)
@@ -125,7 +128,7 @@ internal class ConversationController(private val context: Context, private val 
         check(!state.running && !closing) { "请先停止当前记录" }; check(state.modelReady) { state.error ?: "声音模型尚未准备完成" }
         val cfg = settings.read(); val token = ++generation
         publish(state.copy(activeRecord = null, running = true, stopping = false, mode = mode, source = source, segments = emptyList(), error = null,
-            status = if (mode == ConversationMode.ENROLL) "登记仅采集指定声道的本人声音" else if (source == ConversationSource.REALTIME) "双路保留：通道1默认本人，通道2独立识别" else "混合/单路音频全量识别说话人",
+            status = if (mode == ConversationMode.ENROLL) "登记仅采集指定声道的本人声音" else if (source == ConversationSource.REALTIME) "双路保留：通道1默认本人，通道2独立识别" else if (source == ConversationSource.NATIVE) "原生唤醒：本轮默认本人" else "混合/单路音频全量识别说话人",
             enrollmentSeconds = 0f, enrollmentReady = false, enrollmentCanConfirm = false, enrollmentTotalSeconds = 0f, decodedSeconds = 0.0))
         worker.post {
             config = cfg; samples = 0; captureChannels = 0; roundBaseMS = 0; roundId = wakeId; closing = false
@@ -148,11 +151,13 @@ internal class ConversationController(private val context: Context, private val 
         val old = record!!
         val policy = if (recovering) old.channelPolicy else SpeakerChannelPolicy.policy(state.source, channels)
         record = old.copy(audioChannels = channels, channelPolicy = policy)
-        if (policy == SpeakerChannelPolicy.DUAL_SELF && state.mode != ConversationMode.ENROLL) repository.ensureSelf()
+        if (policy != SpeakerChannelPolicy.FULL_SPEAKER && state.mode != ConversationMode.ENROLL) repository.ensureSelf()
         val needed = if (state.mode == ConversationMode.ENROLL) listOf(enrollmentChannel) else (1..channels).filterNot(::fixedSelf)
         engines.keys.filter { it !in needed }.toList().forEach { engines.remove(it)?.close() }
         needed.forEach { channel -> engine(channel).reset(laneStarts[channel]?.times(1000)?.div(16000) ?: 0,
             meeting = true, enrollment = state.mode == ConversationMode.ENROLL, labelPrefix = "c$channel:R$asrEpoch-") }
+        // Load the learner with the channels, not inside the first wake round's audio path.
+        if (learningSelf()) learner()
         saveRecord()
     }
     fun accept(left: ShortArray, right: ShortArray) {
@@ -202,8 +207,28 @@ internal class ConversationController(private val context: Context, private val 
             activeASR[channel]?.append(selected)
             inputThrough[channel] = startFrame + data.size
             if (!fixedSelf(channel)) engine(channel).accept(selected)
+            if (channel == 1 && learningSelf()) learnFrom(selected)
         }
         drainSentences()
+    }
+    private fun learningSelf() = record?.channelPolicy == SpeakerChannelPolicy.NATIVE_SELF && state.mode != ConversationMode.ENROLL &&
+        !replaying && !liveBackfill && config.optString(SelfVoiceLearning.KEY, "true") != "false"
+    private fun learner(): SpeakerEngine = learner ?: SpeakerEngine(context, { emptyList() }, { SpeakerEngine.DEFAULT_THRESHOLD }, { _, _ -> })
+        .also { it.reset(enrollment = true); learner = it }
+    private fun learnFrom(data: FloatArray) { val engine = learner(); engine.accept(data); harvest(engine) }
+    /** Enrollment evidence is a bounded rolling window, so windows move out as soon as they appear. */
+    private fun harvest(engine: SpeakerEngine) {
+        engine.evidence.forEach { e -> e.embedding?.let { learnedWindows += it to (e.endMS - e.beginMS) / 1000f } }
+        engine.evidence.clear()
+    }
+    /** Called once a wake round's audio is complete; ASR delivery never waits for it. */
+    private fun learnSelf() {
+        val engine = learner ?: return
+        engine.flush(); harvest(engine); engine.reset(enrollment = true)
+        if (learnedWindows.isEmpty()) return
+        val windows = learnedWindows.toList(); learnedWindows.clear()
+        try { repository.learnSelf(windows); publish(state.copy(people = repository.people)) }
+        catch (error: Exception) { publish(state.copy(error = "自动更新本人声音失败：${error.message}")) }
     }
     private fun cancelASR() {
         asrEpoch++; rounds.keys.forEach { it.cancel() }; rounds.clear(); activeASR.clear()
@@ -256,12 +281,12 @@ internal class ConversationController(private val context: Context, private val 
             if (token != generation || !state.running || closing) return@post
             record = record?.let { it.copy(audioAnchors = it.audioAnchors.filter { a -> a.offsetMS != base / 16 } + AudioAnchor(base / 16, receivedAt)) }; saveRecord()
             if (liveBackfill) return@post
-            engines.values.forEach { it.beginRound(base / 16) }; drainSentences(); finishRounds(); roundId = wakeId; roundBaseMS = base / 16
+            engines.values.forEach { it.beginRound(base / 16) }; drainSentences(); finishRounds(); learnSelf(); roundId = wakeId; roundBaseMS = base / 16
             lanes().forEach { laneStarts[it] = base }
         } }
     }
     fun endRound() { writer.post { worker.post {
-        if (state.running && !closing && !liveBackfill) { engines.values.forEach { it.flush() }; drainSentences(); finishRounds(); drainAgent() }
+        if (state.running && !closing && !liveBackfill) { engines.values.forEach { it.flush() }; drainSentences(); finishRounds(); learnSelf(); drainAgent() }
     } } }
     fun transportError(message: String) = fail(message, generation)
     fun report(message: String) { publish(state.copy(error = message)) }
@@ -290,11 +315,12 @@ internal class ConversationController(private val context: Context, private val 
             val precise = sentence.words.isNotEmpty() && sentence.words.joinToString("") { it.text } == sentence.text && sentence.words.all { it.endMS > it.beginMS }
             val units = if (precise) sentence.words.mapIndexed { i, word -> sentence.copy(id = "${sentence.id}:$i", text = word.text, beginMS = word.beginMS, endMS = word.endMS, words = listOf(word)) } else listOf(sentence)
             units.forEach { unit ->
-                val match = if (channelSelf) SpeakerEngine.Assignment(speaker = "c1:本人", personId = self!!.id, stable = true, reason = "双通道策略：通道1默认本人")
+                val match = if (channelSelf) SpeakerEngine.Assignment(speaker = "c1:本人", personId = self!!.id, stable = true,
+                    reason = if (record!!.channelPolicy == SpeakerChannelPolicy.NATIVE_SELF) "原生唤醒策略：默认本人" else "双通道策略：通道1默认本人")
                     else engine(channel).assignment(unit.beginMS, unit.endMS, wordLevel = precise)
                 val manual = manualSpeakers[match.speaker]
                 val person = manual ?: match.personId ?: record!!.speakerPeople[match.speaker].takeIf { match.stable && !match.mixed }
-                val basis = when { manual != null -> "manual"; channelSelf -> "channel1_default_self"; match.mixed -> "mixed"; person != null -> "voiceprint"; else -> "unknown" }
+                val basis = when { manual != null -> "manual"; channelSelf -> SpeakerChannelPolicy.selfBasis(record!!.channelPolicy); match.mixed -> "mixed"; person != null -> "voiceprint"; else -> "unknown" }
                 val attributed = unit.copy(speaker = if (match.mixed) "c$channel:混合" else match.speaker, personId = if (match.mixed) null else person,
                     stable = match.stable, mixed = match.mixed, candidates = match.candidates, matchScore = match.score, matchReason = match.reason, identityBasis = basis,
                     timelineAt = record!!.timelineAt(unit.beginMS), timelineEndAt = record!!.timelineAt((unit.endMS - 1).coerceAtLeast(unit.beginMS)) + 1,
@@ -415,6 +441,7 @@ internal class ConversationController(private val context: Context, private val 
     private fun completeStop(message: String = "全部原音频和各路已完成发言已保存") {
         drainTimeout?.let(worker::removeCallbacks); drainTimeout = null
         tail?.close(); tail = null; engines.values.forEach { it.flush() }; drainSentences()
+        learnSelf(); learner?.close(); learner = null; learnedWindows.clear()
         if (replaying && replayReadComplete && !replayFailed && !deferredProcessing) record = record?.copy(processingPending = false)
         else if (replaying) { record = record?.copy(processingPending = true); nextBackfillAt = System.currentTimeMillis() + 60_000 }
         if (pendingSentences.isNotEmpty()) record = record?.copy(processingPending = true)
@@ -436,8 +463,9 @@ internal class ConversationController(private val context: Context, private val 
         check(state.running && state.mode == ConversationMode.ENROLL && !closing)
         engine(enrollmentChannel).flush(); val assessment = engine(enrollmentChannel).enrollment()
         check(assessment.ready || confirmAllSamples && assessment.confirmationVectors.isNotEmpty()) { assessment.message }
-        val person = (enrollmentTarget ?: VoicePerson(name = name, self = self, contactUri = contactUri)).copy(name = name, self = self,
-            contactUri = contactUri, samples = if (assessment.ready) assessment.vectors else assessment.confirmationVectors, unnamed = false)
+        val stored = enrollmentTarget?.let { target -> repository.people.firstOrNull { it.id == target.id } ?: target }
+        val person = (stored ?: VoicePerson(name = name, self = self, contactUri = contactUri)).copy(name = name, self = self,
+            contactUri = contactUri, samples = if (assessment.ready) assessment.vectors else assessment.confirmationVectors, unnamed = false, autoPending = emptyList())
         repository.savePerson(person); publish(state.copy(people = repository.people, status = "${person.name}的声音已保存在本机")); stop()
     } }
     fun bind(recordId: String, speakerLabel: String, person: VoicePerson, rememberVoice: Boolean) { worker.post {
@@ -449,7 +477,8 @@ internal class ConversationController(private val context: Context, private val 
         applyCorrection(mapOf(recordId to old.segments.filter { it.speaker == speakerLabel }.map { it.id }.toSet()), person.id)
     } }
     fun correctSpeaker(recordId: String, ids: Set<String>, personId: String?, person: VoicePerson? = null) { worker.post {
-        person?.let(repository::savePerson); applyCorrection(mapOf(recordId to ids), personId)
+        // Only a newly created person is stored here; an existing row from UI state may be stale (e.g. auto samples learned since).
+        person?.takeIf { p -> repository.people.none { it.id == p.id } }?.let(repository::savePerson); applyCorrection(mapOf(recordId to ids), personId)
     } }
     fun correctSpeakers(selection: Map<String, Set<String>>, personId: String?) { worker.post { applyCorrection(selection, personId) } }
     private fun applyCorrection(selection: Map<String, Set<String>>, personId: String?) {
@@ -484,6 +513,7 @@ internal class ConversationController(private val context: Context, private val 
         repository.correctMemory(recordId, memoryId, subject, text); publish(state.copy(records = repository.records))
     } }
     fun removeVoice(id: String) { worker.post { repository.removeVoice(id); publish(state.copy(people = repository.people)) } }
+    fun clearAutoSamples(id: String) { worker.post { repository.clearAutoSamples(id); publish(state.copy(people = repository.people)) } }
     private fun day(time: Long) = Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()).toLocalDate().toString()
     private fun summaryConfigured() = settings.read().let { MobileModelEndpoint.isConfigured(it.optString("modelUrl"), it.optString("modelName"), it.optString("modelKey")) }
     fun summarize(recordId: String) { worker.post { enqueueSummary(recordId, "manual") } }
@@ -565,7 +595,7 @@ internal class ConversationController(private val context: Context, private val 
         worker.removeCallbacks(maintenance)
         if (state.running && !closing) stop()
         writer.post { worker.post {
-            generation++; cancelASR(); tail?.close(); engines.values.forEach { it.close() }; engines.clear(); summarizer.close(); inference.shutdownNow()
+            generation++; cancelASR(); tail?.close(); engines.values.forEach { it.close() }; engines.clear(); learner?.close(); learner = null; summarizer.close(); inference.shutdownNow()
             writerThread.quitSafely(); thread.quitSafely()
         } }
     }

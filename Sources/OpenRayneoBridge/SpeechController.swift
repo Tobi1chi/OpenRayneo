@@ -281,6 +281,12 @@ final class SpeechController {
     private var assistantPCM = Data()
     private var assistantStopping = false
     private var assistantSequences: [Int] = []
+    /// Developer opt-in: keep the latest complete realtime capture exactly as handed to ASR/speaker analysis.
+    private let realtimeRecent = NativeDiagnosticRecording(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("OpenRayneo/RealtimeDiagnostics", isDirectory: true), namePrefix: "realtime-recent")
+    private var realtimeRecentID: String?
+    // Pause/reconnect resets packet sequencing, so the dropped span must be recorded explicitly.
+    private var realtimeRecentInterrupted = false
 
     init(transport: RFCOMMTransport, displays: DisplayController) {
         self.transport = transport
@@ -328,7 +334,7 @@ final class SpeechController {
         if phase == "disconnected" {
             transportSuspended = true
             remotePaused = true
-            if assistantCapturing { endAssistantRound(reason: "transport_disconnected") }
+            if assistantCapturing { endAssistantRound(reason: "transport_disconnected"); realtimeRecentInterrupted = true }
             taskID = UUID()
             request?.endAudio(); task?.cancel(); request = nil; task = nil
             desiredDisplayText = ""; transcript = ""; level = 0
@@ -337,7 +343,7 @@ final class SpeechController {
             catch { self.error = error.localizedDescription }
         } else if phase == "paused", !remotePaused {
             remotePaused = true
-            if assistantCapturing { endAssistantRound(reason: "remote_pause") }
+            if assistantCapturing { endAssistantRound(reason: "remote_pause"); realtimeRecentInterrupted = true }
             taskID = UUID()
             request?.endAudio(); task?.cancel(); request = nil; task = nil
         } else if phase == "active", remotePaused {
@@ -413,7 +419,12 @@ final class SpeechController {
                     let feed = AssistantAudioFeed(channels: stereo ? 2 : 1, sampleRate: rate)
                     try start(locale: "zh-CN", duration: body["duration"] as? Int ?? 300, recognize: false,
                               record: false, assistantFeed: feed, assistantChannel: channel, assistantSampleRate: rate, assistantStereo: stereo)
+                    if body["save_latest"] as? Bool == true, let sid {
+                        realtimeRecent.begin(captureID: sid, sampleRate: rate, channels: stereo ? 2 : 1); realtimeRecentID = sid; realtimeRecentInterrupted = false
+                    }
                     return (200, status())
+                case ("GET", "/v1/assistant-audio/diagnostic"):
+                    return (200, realtimeRecent.status)
                 case ("POST", "/v1/assistant-audio/events"):
                     guard let assistantFeed else { throw BridgeError(status: 409, message: "Start assistant audio first") }
                     var response = assistantFeed.read(after: body["after"] as? Int ?? 0)
@@ -740,7 +751,9 @@ final class SpeechController {
         }
         if let stereo {
             if assistantCapturing, let roundID = assistantRoundID, let feed = assistantFeed {
-                assistantPCM.append(AssistantPCMCodec.encode(stereo, channel: assistantChannel, stereo: assistantStereo))
+                let pcm = AssistantPCMCodec.encode(stereo, channel: assistantChannel, stereo: assistantStereo)
+                assistantPCM.append(pcm)
+                if let id = realtimeRecentID { realtimeRecent.append(pcm, captureID: id) }
                 if assistantPCM.count >= assistantSampleRate / 5 * 2 * (assistantStereo ? 2 : 1) { feed.append("pcm", round: roundID, pcm: assistantPCM); assistantPCM = Data() }
             }
             virtualMicrophones.forEach { $0.append(stereo) }
@@ -815,6 +828,14 @@ final class SpeechController {
         running = false
         if assistantCapturing, let feed = assistantFeed {
             endAssistantRound(reason: "capture_stop"); feed.finish()
+        }
+        if let id = realtimeRecentID {
+            // Dropped packets leave a shorter but still continuous file; mark it so it is never mistaken for complete input.
+            pendingLock.lock(); let dropped = overflowPackets; pendingLock.unlock()
+            let failed = missingAudioPackets > 0 || decodeErrors > 0 || dropped > 0 || error != nil
+            realtimeRecent.finish(captureID: id, reason: realtimeRecentInterrupted ? "capture_interrupted" : failed ? "capture_error" : "capture_stop",
+                                  incomplete: failed || realtimeRecentInterrupted)
+            realtimeRecentID = nil
         }
         assistantCapturing = false
         transport.setAudioHandler(nil)

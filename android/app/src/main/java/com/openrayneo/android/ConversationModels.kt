@@ -11,20 +11,36 @@ internal enum class ConversationSource(val title: String) { REALTIME("实时双�
 internal data class VoiceMatch(val personId: String, val score: Float) {
     fun json() = JSONObject().put("personId", personId).put("score", score)
 }
+/** One automatically learned self reference window (<=3 s, production enrollment chunking). */
+internal data class AutoVoiceSample(val vector: FloatArray, val seconds: Float, val at: Long) {
+    fun json() = JSONObject().put("vector", JSONArray(vector.toList())).put("seconds", seconds.toDouble()).put("at", at)
+    companion object {
+        fun parse(v: JSONObject) = AutoVoiceSample(v.getJSONArray("vector").let { row -> FloatArray(row.length()) { row.getDouble(it).toFloat() } },
+            v.getDouble("seconds").toFloat(), v.getLong("at"))
+        fun list(a: JSONArray?) = a?.let { List(it.length()) { i -> parse(it.getJSONObject(i)) } } ?: emptyList()
+    }
+}
 internal data class VoicePerson(
     val id: String = UUID.randomUUID().toString(), val name: String, val self: Boolean = false,
     val contactUri: String? = null, val model: String = SpeakerEngine.MODEL,
     val samples: List<FloatArray> = emptyList(), val unnamed: Boolean = false,
     val revision: Int = 1, val changeSequence: Long = 0, val mergedInto: String? = null,
+    /** Self only: references learned from native wake rounds (never replace manual [samples]) and windows awaiting a first consistent profile. */
+    val autoSamples: List<AutoVoiceSample> = emptyList(), val autoPending: List<AutoVoiceSample> = emptyList(),
 ) {
+    val references: List<FloatArray> get() = samples + autoSamples.map { it.vector }
+    /** Voice vectors stay on the device: sync and local API rows carry identity fields only. */
+    fun publicJson() = json().apply { remove("samples"); remove("autoSamples"); remove("autoPending") }
     fun json() = JSONObject().put("id", id).put("name", name).put("self", self).put("contactUri", contactUri)
         .put("model", model).put("samples", JSONArray(samples.map { JSONArray(it.toList()) }))
         .put("unnamed", unnamed).put("revision", revision).put("changeSequence", changeSequence).put("mergedInto", mergedInto)
+        .put("autoSamples", JSONArray(autoSamples.map { it.json() })).put("autoPending", JSONArray(autoPending.map { it.json() }))
     companion object {
         fun parse(value: JSONObject) = VoicePerson(value.getString("id"), value.getString("name"), value.optBoolean("self"),
             value.optString("contactUri").takeIf { it.isNotBlank() && it != "null" }, value.getString("model"),
             value.optJSONArray("samples")?.let { list -> List(list.length()) { i -> list.getJSONArray(i).let { row -> FloatArray(row.length()) { row.getDouble(it).toFloat() } } } } ?: emptyList(), value.optBoolean("unnamed"), value.optInt("revision", 1), value.optLong("changeSequence"),
-            value.optString("mergedInto").takeUnless { it.isBlank() || it == "null" })
+            value.optString("mergedInto").takeUnless { it.isBlank() || it == "null" },
+            AutoVoiceSample.list(value.optJSONArray("autoSamples")), AutoVoiceSample.list(value.optJSONArray("autoPending")))
     }
 }
 /** PCM offsets remain continuous; official input rounds retain their independent wall-clock anchors. */

@@ -24,7 +24,7 @@ final class LocalVoiceLab: ObservableObject {
     @Published private(set) var channelPolicy = "full_speaker"
     @Published var enrolling = false
     @Published var transcribe = false
-    @Published var threshold = 0.7
+    @Published var threshold = Double(LocalSpeakerEngine.defaultThreshold)
     @Published var duration = 120
     @Published var name = "我"
     @Published var isSelf = true
@@ -49,8 +49,9 @@ final class LocalVoiceLab: ObservableObject {
     var speakers: [String] { Array(Set(turns.map(\.speaker).filter { $0 != "未知" && $0 != "登记" })).sorted() }
     var canSave: Bool { !running && !turns.isEmpty && (assessment.ready || confirmed && !assessment.confirmationVectors.isEmpty) }
 
+    /// Reloads on every panel appearance: native wake rounds may have refreshed the self profile meanwhile.
     func loadPeople() {
-        guard !profilesLoaded else { return }
+        guard !running else { return }
         do { people = try LocalVoiceStore.load(); profilesLoaded = true }
         catch { self.error = error.localizedDescription }
     }
@@ -61,6 +62,8 @@ final class LocalVoiceLab: ObservableObject {
     private func begin(live: Bool) -> UUID {
         player?.stop(); task?.cancel(); generation = UUID(); stopRequested = false
         turns = []; audio = []; receivedSeconds = 0; progress = 0; elapsed = 0; error = nil; confirmed = false
+        // Wake rounds may have refreshed the self profile since the panel loaded it.
+        do { people = try LocalVoiceStore.load() } catch { self.error = error.localizedDescription }
         matchingPeople = people
         running = true; self.live = live; stopping = false; status = "正在加载与 Android 相同的模型…"
         startedAt = Date()
@@ -76,7 +79,7 @@ final class LocalVoiceLab: ObservableObject {
                 let selected = enrolling && channel == 3 ? 1 : channel
                 let reader = try LocalVoiceAudioReader(url: url, channel: selected)
                 guard reader.duration <= 1800 else { throw AssistantFailure("测试台每次最多处理30分钟录音，请先在录音资料库剪辑选段。") }
-                let selfPerson = reader.outputChannels == 2 && !enrolling ? try LocalVoiceStore.ensureSelf() : nil
+                let selfPerson = reader.outputChannels == 2 && !enrolling ? try await MainActor.run { try LocalVoiceStore.ensureSelf() } : nil
                 let engine = try ChannelSpeakerProcessor(channels: reader.outputChannels, people: people, threshold: threshold,
                     enrolling: enrolling, selfPerson: selfPerson, selectedChannel: selected == 3 ? nil : max(1, selected), offlineDiarization: true)
                 await configure(channels: reader.outputChannels, policy: engine.channelPolicy, selfPerson: selfPerson, id: id)
@@ -211,13 +214,19 @@ final class LocalVoiceLab: ObservableObject {
     func saveEnrollment() {
         guard canSave else { return }
         do {
-            var updated = people
+            var updated = try LocalVoiceStore.load()
             let vectors = assessment.ready ? assessment.vectors : assessment.confirmationVectors
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { throw AssistantFailure("请填写人物名字") }
-            var person = people.first(where: { $0.id == selectedPerson }) ?? LocalVoicePerson(name: trimmed)
+            var person = updated.first(where: { $0.id == selectedPerson }) ?? LocalVoicePerson(name: trimmed)
             person.name = trimmed; person.isSelf = isSelf; person.samples = vectors
-            if isSelf { for i in updated.indices { updated[i].isSelf = false } }
+            // Automatic samples are the wearer's voice and only live on the current self; manual references end bootstrap pending.
+            person.autoPending = nil
+            if !isSelf { person.autoSamples = nil }
+            if isSelf {
+                // Automatic samples belong to whoever is self; a different self must not inherit or keep them.
+                for i in updated.indices where updated[i].id != person.id { updated[i].isSelf = false; updated[i].autoSamples = nil; updated[i].autoPending = nil }
+            }
             updated.removeAll { $0.id == person.id }; updated.append(person)
             try LocalVoiceStore.save(updated); people = updated; selectedPerson = person.id
             status = "已保存\(person.name)的\(vectors.count)个声音样本，下次分析生效"
@@ -225,15 +234,23 @@ final class LocalVoiceLab: ObservableObject {
     }
     func removeVoice(_ id: String) {
         do {
-            var updated = people; if let index = updated.firstIndex(where: { $0.id == id }) { updated[index].samples = [] }
+            var updated = try LocalVoiceStore.load()
+            if let index = updated.firstIndex(where: { $0.id == id }) { updated[index].samples = []; updated[index].autoSamples = nil; updated[index].autoPending = nil }
+            try LocalVoiceStore.save(updated); people = updated
+        } catch { self.error = error.localizedDescription }
+    }
+    func clearAutoSamples(_ id: String) {
+        do {
+            var updated = try LocalVoiceStore.load()
+            if let index = updated.firstIndex(where: { $0.id == id }) { updated[index].autoSamples = nil; updated[index].autoPending = nil }
             try LocalVoiceStore.save(updated); people = updated
         } catch { self.error = error.localizedDescription }
     }
     func bindSpeaker() {
         do {
-            var updated = people
+            var updated = try LocalVoiceStore.load()
             let trimmed = bindingName.trimmingCharacters(in: .whitespacesAndNewlines)
-            var person = people.first(where: { $0.id == bindingPerson }) ?? LocalVoicePerson(name: trimmed)
+            var person = updated.first(where: { $0.id == bindingPerson }) ?? LocalVoicePerson(name: trimmed)
             guard !person.name.isEmpty else { throw AssistantFailure("请选择人物或填写新名字") }
             if rememberVoice {
                 person.samples = turns.filter { $0.speaker == bindingSpeaker && !$0.mixed && $0.embedding != nil }

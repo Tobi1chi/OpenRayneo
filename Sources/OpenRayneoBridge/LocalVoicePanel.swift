@@ -8,6 +8,8 @@ struct LocalVoicePanel: View {
     @ObservedObject var model: LocalVoiceLab
     @ObservedObject var asr: LocalASRSettings
     @State private var recordingID: UUID?
+    @AppStorage(LocalVoiceSelfLearning.enabledKey) private var autoLearn = true
+    @State private var lastLearnToken = UUID()
     private var assessment: LocalVoiceAssessment { model.assessment }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -46,10 +48,10 @@ struct LocalVoicePanel: View {
                     Toggle("分段完成后，使用本地 ASR 生成文字", isOn: $model.transcribe).disabled(model.enrolling || !asr.ready)
                     HStack {
                         Text("人物匹配阈值")
-                        Slider(value: $model.threshold, in: 0.5...0.95, step: 0.01)
+                        Slider(value: $model.threshold, in: 0.3...0.95, step: 0.01)
                         Text(model.threshold, format: .number.precision(.fractionLength(2))).monospacedDigit()
                     }
-                    Text("默认人物匹配0.70、候选差距0.08、跨句聚类0.60、分段聚类0.65。文件最多30分钟；实时收音不保存原始文件，结果保留在内存供回听。")
+                    Text("默认人物匹配0.50、候选差距0.08、跨句聚类0.60、分段聚类0.65。文件最多30分钟；实时收音默认不保存原始文件（可在“录音开发者工具”开启保存最近一轮），结果保留在内存供回听。")
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(8).disabled(model.running)
             }
@@ -125,17 +127,44 @@ struct LocalVoicePanel: View {
             }
             GroupBox("本机声音档案") {
                 VStack(alignment: .leading, spacing: 10) {
+                    Toggle("“小雷小雷”唤醒轮自动更新我的声音", isOn: $autoLearn)
+                    Text("唤醒轮按策略默认是你；结束后在本机提取声音。还没有档案时，累计一致人声满10秒、3段后自动建档；已有档案后只收与档案相似度≥0.50的片段，最多保留10个自动样本，手动登记的样本不会被替换。Mac与手机档案各自独立。")
+                        .font(.caption).foregroundStyle(.secondary)
                     if model.people.isEmpty { Text("尚未登记人物声音").foregroundStyle(.secondary) }
                     ForEach(model.people) { person in
                         HStack {
                             Text(person.name + (person.isSelf ? " · 我" : "")); Spacer()
-                            Text("\(person.samples.count)个声音样本").foregroundStyle(.secondary)
-                            Button("移除声音") { model.removeVoice(person.id) }.disabled(model.running || person.samples.isEmpty)
+                            Text(sampleSummary(person)).foregroundStyle(.secondary)
+                            if !(person.autoSamples ?? []).isEmpty || !(person.autoPending ?? []).isEmpty {
+                                Button("清除自动样本") { model.clearAutoSamples(person.id) }.disabled(model.running)
+                            }
+                            Button("移除声音") { model.removeVoice(person.id) }.disabled(model.running || person.references.isEmpty && (person.autoPending ?? []).isEmpty)
                         }
+                    }
+                    HStack {
+                        Text(lastLearn).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        Spacer()
+                        Button("刷新档案") { model.loadPeople(); lastLearnToken = UUID() }.disabled(model.running)
                     }
                 }.padding(8)
             }
         }.task { model.loadPeople() }
+        .onReceive(NotificationCenter.default.publisher(for: LocalVoiceSelfLearning.updated)) { _ in model.loadPeople(); lastLearnToken = UUID() }
+    }
+    private var lastLearn: String {
+        _ = lastLearnToken
+        guard let last = UserDefaults.standard.dictionary(forKey: LocalVoiceSelfLearning.lastResultKey),
+              let at = last["at"] as? Date, let summary = last["summary"] as? String else { return "尚无唤醒轮自动学习记录" }
+        return "最近一次自动学习 \(at.formatted(date: .abbreviated, time: .standard))：\(summary)"
+    }
+    private func sampleSummary(_ person: LocalVoicePerson) -> String {
+        let auto = person.autoSamples ?? [], pending = (person.autoPending ?? []).reduce(Float(0)) { $0 + $1.seconds }
+        var parts = ["手动\(person.samples.count)个"]
+        if person.isSelf || !auto.isEmpty {
+            parts.append("自动\(auto.count)个" + (auto.map(\.at).max().map { "（\($0.formatted(date: .abbreviated, time: .shortened))）" } ?? ""))
+        }
+        if pending > 0 { parts.append(String(format: "待建档%.0f秒", pending)) }
+        return parts.joined(separator: " · ")
     }
     private func time(_ ms: Int64) -> String { String(format: "%02d:%02d.%03d", ms / 60000, ms / 1000 % 60, ms % 1000) }
 }

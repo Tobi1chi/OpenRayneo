@@ -11,7 +11,12 @@ struct LocalVoicePerson: Codable, Identifiable {
     var name: String
     var isSelf = false
     var model = LocalSpeakerEngine.modelID
+    /// Manually enrolled or bound references; never replaced by automatic learning.
     var samples: [[Float]] = []
+    /// Self only: references learned from native wake rounds, and windows waiting for a first consistent profile.
+    var autoSamples: [LocalVoiceAutoSample]?
+    var autoPending: [LocalVoiceAutoSample]?
+    var references: [[Float]] { samples + (autoSamples ?? []).map(\.vector) }
 }
 
 struct LocalSpeakerTurn: Identifiable, Codable {
@@ -96,6 +101,9 @@ struct LocalVoiceAssessment {
 /// live capture retains its bounded VAD scheduling. Neither path changes thresholds.
 actor LocalSpeakerEngine {
     static let modelID = "campplus-zh-16k-common/sherpa-2.0.1"
+    /// Top-3 mean against <=3 s enrollment windows. Calibrated 2026-11-20 on this model:
+    /// same-speaker queries ~0.56-0.64 (glasses native) / median 0.59 (public), other speakers <=0.20.
+    static let defaultThreshold: Float = 0.5
     private let extractor: OpaquePointer?
     private let vad: OpaquePointer
     private let diarizer: OpaquePointer?
@@ -104,6 +112,7 @@ actor LocalSpeakerEngine {
     private let people: [LocalVoicePerson]
     private let threshold: Float
     private let defaultSelfID: String?
+    private let defaultSelfBasis: String
     private let sourceChannel: Int
     private let offlineDiarization: Bool
     private var continuousAudio: [Float] = []
@@ -116,12 +125,12 @@ actor LocalSpeakerEngine {
     private var clusters: [Cluster] = []
 
     init(enrolling: Bool, people: [LocalVoicePerson], threshold: Float, sourceChannel: Int = 1, defaultSelfID: String? = nil,
-         offlineDiarization: Bool = false) throws {
-        self.enrolling = enrolling; self.people = people; self.threshold = threshold
+         defaultSelfBasis: String = "channel1_default_self", offlineDiarization: Bool = false) throws {
+        self.enrolling = enrolling; self.people = people; self.threshold = threshold; self.defaultSelfBasis = defaultSelfBasis
         self.sourceChannel = sourceChannel; self.defaultSelfID = enrolling ? nil : defaultSelfID
         self.offlineDiarization = offlineDiarization && !enrolling && defaultSelfID == nil
         if let _ = self.defaultSelfID {
-            // Channel 1 needs speech boundaries, but never loads embedding/diarization models.
+            // A default-self lane (dual ch1 or native wake) needs speech boundaries, but never loads embedding/diarization models.
             extractor = nil; diarizer = nil; dimension = 0
             let path = Self.modelsFolder.appendingPathComponent("silero-vad.onnx").path
             let detector = path.withCString { path in "cpu".withCString { cpu in
@@ -246,7 +255,7 @@ actor LocalSpeakerEngine {
             analyzedThrough = end
             if let defaultSelfID {
                 turns.append(LocalSpeakerTurn(beginMS: begin, endMS: end, speaker: "我", personID: defaultSelfID,
-                    sourceChannel: sourceChannel, identityBasis: "channel1_default_self"))
+                    sourceChannel: sourceChannel, identityBasis: defaultSelfBasis))
                 continue
             }
             if enrolling {
@@ -332,8 +341,8 @@ actor LocalSpeakerEngine {
         clusters.append(Cluster(label: label, samples: [vector])); return label
     }
     private func person(_ vector: [Float]) -> (String?, Float)? {
-        let candidates = people.filter { $0.model == Self.modelID && !$0.samples.isEmpty }.map { person -> (String, Float) in
-            let scores = person.samples.map { Self.cosine(vector, $0) }.sorted(by: >).prefix(3)
+        let candidates = people.filter { $0.model == Self.modelID && !$0.references.isEmpty }.map { person -> (String, Float) in
+            let scores = person.references.map { Self.cosine(vector, $0) }.sorted(by: >).prefix(3)
             return (person.id, Float(scores.reduce(0.0) { $0 + Double($1) } / Double(scores.count)))
         }.sorted { $0.1 > $1.1 }
         guard let best = candidates.first else { return nil }
@@ -409,7 +418,7 @@ struct LocalVoiceMatchingDiagnostics: Encodable {
 
     static func make(people: [LocalVoicePerson], turns: [LocalSpeakerTurn]) -> Self {
         let person = people.first { $0.isSelf }
-        let samples = person?.samples ?? []
+        let samples = person?.references ?? []
         // Same model/nonempty gate as the production person matcher.
         let eligible = person?.model == LocalSpeakerEngine.modelID && !samples.isEmpty
         let references = samples.enumerated().map { index, vector in

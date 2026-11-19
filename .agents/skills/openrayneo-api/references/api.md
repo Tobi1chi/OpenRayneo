@@ -18,7 +18,7 @@
 
 默认助手会话采集、ASR 并交付整句；完整性、等待／提示／任务分支与通用回复由本机 Agent 处理。助手页保留显式“模型实验模式”。HTTP 事件接口读取已发布的输入，不会自行启动采集或 ASR；GUI 助手会话启用基础 ASR 后发布最终整句，纯 API 工作流也可自行消费原生事件／PCM。
 
-默认眼镜双路输入分别处理：通道1仅VAD＋ASR并归属稳定本人，不运行声纹或diarization；通道2独立完成VAD、说话人分段、声纹与ASR。真实单声道、原生助手和全天智记混合单声道全量说话人处理。事件附带 `sourceChannel`、`identityBasis`、`personId`、`beginMS/endMS` 和可用的 `speakerTurns`；身份依据为 `channel1_default_self/voiceprint/unknown/mixed/manual`，不能仅凭 sourceChannel=1 推断本人。时间粗粒度的 ASR 句子保留其实际相交的说话人区间，不猜词级切分；同一声音出现在两路时保留两份来源，不做猜测式文字去重。
+默认眼镜双路输入分别处理：通道1仅VAD＋ASR并归属稳定本人，不运行声纹或diarization；通道2独立完成VAD、说话人分段、声纹与ASR。“小雷小雷”原生助手轮按用户策略默认本人：仅VAD＋ASR，不运行声纹或diarization；真实单声道和全天智记混合单声道全量说话人处理。事件附带 `sourceChannel`、`identityBasis`、`personId`、`beginMS/endMS` 和可用的 `speakerTurns`；身份依据为 `channel1_default_self/native_wake_self/voiceprint/unknown/mixed/manual`，不能仅凭 sourceChannel=1 推断本人。时间粗粒度的 ASR 句子保留其实际相交的说话人区间，不猜词级切分；同一声音出现在两路时保留两份来源，不做猜测式文字去重。
 
 `POST /v1/assistant-audio/start` 的 `pcm_layout:"stereo"` 显式返回交错双路 PCM，`sample_rate` 可为16000/48000；此模式忽略单路 `channel` 选择，保留真实两路。省略 pcm_layout 或设 mono 时，沿用旧 `channel:0` 混音、1/2选道的单声道接口。`POST /v1/assistant-audio/events` 用 `{"after":0}` 获取单消费者确认流，begin/pcm/end 事件带 `channels/sampleRate/format:pcm_s16le_interleaved`，PCM以Base64返回；帧数为字节数÷channels÷2，两路共用帧时钟。Opus包的mono/stereo编码标志只用于诊断，不作为物理通道或本人身份依据；合法mono-coded包在立体声会话中保留其decoder的两路输出，不因两路声音相同而删除。
 
@@ -47,7 +47,7 @@ JSON
 | 方法与路径 | 请求／含义 |
 | --- | --- |
 | `GET /v1/records` 或 `POST /v1/records/query` | 可选 `from/to`（Unix 毫秒）、`recordId`、`text`，返回完整记录数组及 sync 状态；按 `[createdAt,endedAt)` 与查询半开区间交集筛选，活跃记录延续至当前时间 |
-| `GET /v1/records/people` | 同步的人物档案快照，不含声纹向量 |
+| `GET /v1/records/people` | 同步的人物档案快照，不含声纹向量（含唤醒轮自动学习的样本） |
 | `POST /v1/records/derived` | `recordId/sourceRevision/kind`，可带 `id/revision/text/tags/agent`；新增 UUID、省略版本时从已知版本递增；返回派生项与 queued |
 | `POST /v1/records/audio` | `{"recordId":"已有记录 UUID"}`，显式获取 WAV 并返回 `audioPath` 和 cached；重复请求复用缓存 |
 | `GET /v1/records/sync` | peer、启用状态、游标、副本数、待回写数和错误，不返回 token |

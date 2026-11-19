@@ -2,12 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openrayneo.android
 
-/** Source and actual channel count decide roles; a mono channel is never assigned self by position. */
+/** Source and actual channel count decide roles; mono is self only for the user's own native wake, never by position. */
 internal object SpeakerChannelPolicy {
     const val DUAL_SELF = "dual_channel1_self"
+    // User decision 2026-11-20: only the wearer says the wake word, so the native round is the wearer's request.
+    const val NATIVE_SELF = "native_wake_self"
     const val FULL_SPEAKER = "full_speaker"
-    fun policy(source: ConversationSource, channels: Int) = if (source == ConversationSource.REALTIME && channels == 2) DUAL_SELF else FULL_SPEAKER
-    fun fixedSelf(policy: String, channel: Int) = policy == DUAL_SELF && channel == 1
+    fun policy(source: ConversationSource, channels: Int) = when {
+        source == ConversationSource.REALTIME && channels == 2 -> DUAL_SELF
+        source == ConversationSource.NATIVE -> NATIVE_SELF
+        else -> FULL_SPEAKER
+    }
+    fun fixedSelf(policy: String, channel: Int) = channel == 1 && (policy == DUAL_SELF || policy == NATIVE_SELF)
+    fun selfBasis(policy: String) = if (policy == NATIVE_SELF) "native_wake_self" else "channel1_default_self"
 }
 internal data class ConversationPCM(val channels: List<FloatArray>) {
     val frames get() = channels.firstOrNull()?.size ?: 0

@@ -90,7 +90,7 @@ kind 为 rolling/record_end/day_end；day_end.day 是 `YYYY-MM-DD`，跨午夜�
 人物含 `id,name,self,contactUri,model,revision` 和合并/纠正元数据。
 `mergedInto` 保留退休身份及历史关联；不是删除旧人物 ID 或自动全库改写所有片段。
 显式纠正/合并/拆分由手机选择历史范围并修订受影响记录，人工归属不得被音频补齐覆盖。
-默认交换去掉 `speakerSamples`、人物 samples/embedding 和原音频；Mac 人物快照不能当作可做声纹推理的参考库。
+默认交换去掉 `speakerSamples`、人物 samples／autoSamples／autoPending／embedding 和原音频；Mac 人物快照不能当作可做声纹推理的参考库。
 Mac 本地声纹资料与手机声纹资料独立，当前不通过该协议同步原始向量。
 
 ## 4. 双路与旧 mono
@@ -101,10 +101,11 @@ Mac 本地声纹资料与手机声纹资料独立，当前不通过该协议同�
 | 策略/字段 | 含义 |
 | --- | --- |
 | `dual_channel1_self` | 实际双路 REALTIME：ch1 独立 ASR、默认本人、跳过 embedding/diarization；ch2 独立完整 speaker/ASR |
-| `full_speaker` | 原生、全天混合或实际 mono，全部按完整 speaker 处理 |
+| `native_wake_self` | 原生“小雷小雷”唤醒轮（mono）：独立 ASR、默认本人、跳过 embedding/diarization；旧原生记录保留其 `full_speaker` |
+| `full_speaker` | 全天混合或其他实际 mono，全部按完整 speaker 处理 |
 | `legacy_selected_mono` | 旧版只保存选中一路；不能补造已丢另一通道 |
 | `segment.sourceChannel` | 存档 PCM 的路号 1/2；mono/混合也是 1，因此不能直接据此认本人 |
-| `identityBasis` | `channel1_default_self` / `voiceprint` / `unknown` / `mixed` / `manual` |
+| `identityBasis` | `channel1_default_self` / `native_wake_self` / `voiceprint` / `unknown` / `mixed` / `manual` |
 
 保留 channelPolicy + sourceChannel + identityBasis；两路同文或都匹配本人也不删除任何一路。
 Opus coded channels 允许逐帧变化，不能按 TOC 把一段 stereo 会话改成“真实 mono”。
@@ -152,7 +153,7 @@ Mac 仅在显式请求后下载并缓存独立文件，普通交换不拉音频�
 | 路由 | 合同 |
 | --- | --- |
 | `GET /v1/records` / `POST /v1/records/query` | `from/to` Unix ms、recordId、text；返回副本 |
-| `GET /v1/records/people` | 不含声纹 samples 的人物快照 |
+| `GET /v1/records/people` | 不含声纹 samples／autoSamples／autoPending 的人物快照 |
 | `POST /v1/records/derived` | 提交派生；省略 id/revision/updatedAt/agent 时生成默认值 |
 | `POST /v1/records/audio` | `{recordId}`，显式获取音频缓存 |
 | `GET /v1/records/sync` | 不含 token 的状态、cursor、pendingCount、错误 |
