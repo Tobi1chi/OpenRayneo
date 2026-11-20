@@ -236,12 +236,25 @@ private struct DesktopControlView: View {
                     }.labelsHidden().pickerStyle(.menu).controlSize(.small)
                     Spacer()
                 }
+                Toggle(L("同步眼镜系统语言", "Sync glasses language"), isOn: $language.syncGlassesLanguage)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Token.sideBarSectionHeaderForeground)
                 Text(L("手机占用连接时，请先关闭手机蓝牙。", "Turn off phone Bluetooth if your phone holds the glasses link."))
                     .font(.system(size: 11)).foregroundStyle(Token.sideBarSectionHeaderForeground).fixedSize(horizontal: false, vertical: true)
             }
                 .padding(.horizontal, 18).padding(.vertical, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .overlay(alignment: .top) { Rectangle().fill(Token.sideBarBorder).frame(height: 1) }
+                .onChange(of: language.mode) { _ in
+                    Task { await bridge.glassesSettings.syncLanguageFromApp() }
+                }
+                .onChange(of: language.syncGlassesLanguage) { enabled in
+                    if enabled {
+                        Task { await bridge.glassesSettings.syncLanguageFromApp() }
+                    }
+                }
         }.frame(width: 256).frame(maxHeight: .infinity).background(Token.sideBarBackground)
     }
 

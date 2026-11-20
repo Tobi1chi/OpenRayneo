@@ -248,6 +248,35 @@ final class GlassesSettingsModel: ObservableObject {
         await apply("control", ["command": command, "value": value, "mode": mode, "data": data.isEmpty ? "" : data as Any])
     }
 
+    func syncLanguageFromApp() async {
+        guard AppLanguageStore.shared.syncGlassesLanguage, connected, !busy else { return }
+        if !loaded {
+            await refresh(force: false)
+        }
+        guard loaded, !busy else { return }
+        let supported = settings["supportedLanguages"] as? [String] ?? []
+        guard let target = AppLanguageStore.preferredGlassesLanguage(
+            isEnglish: AppLanguageStore.currentIsEnglish(),
+            supported: supported
+        ) else { return }
+        let current = (settings["language"] as? String ?? language).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard current.caseInsensitiveCompare(target) != .orderedSame else { return }
+        language = target
+        await control("language_change", data: ["currentLang": target])
+    }
+
+    func applyLanguageAndSyncApp() async {
+        let requested = language
+        await control("language_change", data: ["currentLang": requested])
+        guard AppLanguageStore.shared.syncGlassesLanguage else { return }
+        let confirmed = (settings["language"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard confirmed.caseInsensitiveCompare(requested) == .orderedSame,
+              let nextMode = AppLanguageStore.appMode(forGlassesLanguage: confirmed) else { return }
+        if AppLanguageStore.shared.mode != nextMode {
+            AppLanguageStore.shared.mode = nextMode
+        }
+    }
+
     func rename() async { await apply("control", ["command": "device_name_change", "data": deviceName]) }
     func assistant(_ name: String, mode: Int = 0, data: String = "") async { await apply("assistant", ["command": name, "mode": mode, "data": data]) }
     func setRelay() async {
@@ -364,10 +393,10 @@ struct GlassesSettingsPanel: View {
                 }
                 GroupBox("语言与隐私") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Picker("系统语言", selection: $model.language) {
+                        Picker(L("系统语言", "System Language"), selection: $model.language) {
                             ForEach(model.settings["supportedLanguages"] as? [String] ?? ["zh-CN", "en-US"], id: \.self) { Text($0).tag($0) }
                         }
-                        Button("应用语言") { Task { await model.control("language_change", data: ["currentLang": model.language]) } }
+                        Button(L("应用语言", "Apply Language")) { Task { await model.applyLanguageAndSyncApp() } }
                         Toggle("眼镜麦克风", isOn: $model.micEnabled)
                         Toggle("指示灯", isOn: $model.ledEnabled)
                         Toggle("指示灯自动亮度", isOn: $model.ledAutomatic)

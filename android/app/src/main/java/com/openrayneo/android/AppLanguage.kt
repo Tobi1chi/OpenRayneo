@@ -22,13 +22,18 @@ internal enum class AppLanguageMode(val key: String) {
 internal object AppLanguage {
     private const val PREF_NAME = "companion_ui"
     private const val PREF_KEY = "language"
+    private const val SYNC_GLASSES_KEY = "syncGlassesLanguage"
 
     var mode by mutableStateOf(AppLanguageMode.SYSTEM)
+        private set
+
+    var syncGlassesLanguage by mutableStateOf(true)
         private set
 
     fun init(context: Context) {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         mode = AppLanguageMode.fromKey(prefs.getString(PREF_KEY, AppLanguageMode.SYSTEM.key))
+        syncGlassesLanguage = prefs.getBoolean(SYNC_GLASSES_KEY, true)
     }
 
     fun set(context: Context, key: String) {
@@ -37,6 +42,14 @@ internal object AppLanguage {
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(PREF_KEY, next.key)
+            .apply()
+    }
+
+    fun setSyncGlassesLanguage(context: Context, enabled: Boolean) {
+        syncGlassesLanguage = enabled
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(SYNC_GLASSES_KEY, enabled)
             .apply()
     }
 
@@ -51,6 +64,23 @@ internal object AppLanguage {
         AppLanguageMode.ZH -> false
         AppLanguageMode.EN -> true
         AppLanguageMode.SYSTEM -> !systemLanguage.lowercase(Locale.ROOT).startsWith("zh")
+    }
+
+    internal fun preferredGlassesLanguage(isEnglish: Boolean, supported: List<String>): String? {
+        if (supported.isEmpty()) return null
+        val exact = if (isEnglish) "en-us" else "zh-cn"
+        val prefix = if (isEnglish) "en" else "zh"
+        supported.firstOrNull { it.lowercase(Locale.ROOT) == exact }?.let { return it }
+        return supported.firstOrNull { it.lowercase(Locale.ROOT).startsWith(prefix) }
+    }
+
+    internal fun appModeForGlassesLanguage(code: String): AppLanguageMode? {
+        val normalized = code.trim().lowercase(Locale.ROOT)
+        return when {
+            normalized.startsWith("zh") -> AppLanguageMode.ZH
+            normalized.startsWith("en") -> AppLanguageMode.EN
+            else -> null
+        }
     }
 
     val isEnglish: Boolean

@@ -89,6 +89,9 @@ internal class AppModel(application: Application) : AndroidViewModel(application
     val language: String
         get() = AppLanguage.mode.key
 
+    val syncGlassesLanguage: Boolean
+        get() = AppLanguage.syncGlassesLanguage
+
     var deviceName by
         mutableStateOf(preferences.getString("deviceName", "RayNeo iO") ?: "RayNeo iO")
         private set
@@ -334,6 +337,27 @@ internal class AppModel(application: Application) : AndroidViewModel(application
 
     fun changeLanguage(value: String) {
         AppLanguage.set(context, value)
+        syncGlassesLanguageIfConnected()
+    }
+
+    fun changeSyncGlassesLanguage(enabled: Boolean) {
+        AppLanguage.setSyncGlassesLanguage(context, enabled)
+        if (enabled) syncGlassesLanguageIfConnected()
+    }
+
+    fun syncGlassesLanguageIfConnected() {
+        if (!AppLanguage.syncGlassesLanguage) return
+        val s = bridge ?: return
+        if (state.glasses.link.phase != LinkPhase.FULL) return
+        runCatching { s.deviceSettings.syncLanguageForApp(AppLanguage.isEnglish) }
+    }
+
+    fun applyGlassesLanguage(code: String) = attempt {
+        service().deviceSettings.language(code) {
+            if (!AppLanguage.syncGlassesLanguage) return@language
+            val next = AppLanguage.appModeForGlassesLanguage(code) ?: return@language
+            if (AppLanguage.mode != next) AppLanguage.set(context, next.key)
+        }
     }
 
     override fun onCleared() {

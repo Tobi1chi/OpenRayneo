@@ -325,6 +325,21 @@ internal fun SettingsScreen(
                     TextButton(onClick = { model.changeLanguage(key) }) { Text(title) }
                 }
             }
+            HorizontalDivider()
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(L("同步眼镜系统语言", "Sync glasses language"), style = MaterialTheme.typography.bodyMedium)
+                    Note(L("切换界面或眼镜语言时自动保持一致", "Keep app UI and glasses system language in sync"))
+                }
+                Switch(
+                    checked = model.syncGlassesLanguage,
+                    onCheckedChange = { model.changeSyncGlassesLanguage(it) },
+                )
+            }
         }
         SectionLabel(L("外观", "Appearance"))
         ContentCard {
