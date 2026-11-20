@@ -11,8 +11,8 @@
 </p>
 
 <p>
-  <a href="https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5"><img src="https://img.shields.io/badge/release-v1.2.0--beta.5-2563eb?style=flat-square" alt="Release" /></a>
-  <img src="https://img.shields.io/badge/macOS-13%2B%20(Apple%20Silicon)-111827?style=flat-square&logo=apple&logoColor=white" alt="macOS" />
+  <a href="https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/release-v1.2.0-2563eb?style=flat-square" alt="Release" /></a>
+  <img src="https://img.shields.io/badge/macOS-15%2B%20(Apple%20Silicon)-111827?style=flat-square&logo=apple&logoColor=white" alt="macOS" />
   <img src="https://img.shields.io/badge/Android-13%2B%20(API%2033%2B)-16a34a?style=flat-square&logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/i18n-English%20%7C%20%E4%B8%AD%E6%96%87-7c3aed?style=flat-square" alt="Languages" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-64748b?style=flat-square" alt="License" /></a>
@@ -40,7 +40,7 @@ OpenRayneo is an independent open-source companion for **RayNeo iO** smart glass
 - **macOS (`OpenRayneoBridge`)**: Built for desktop workflows, virtual microphone routing, local HTTP API automation, recording review, and protocol testing.
 - **Android (`OpenRayneo`)**: Built for everyday wearable use, turn-by-turn navigation mirroring, on-device conversation recording, and local mobile Agent (`DSH Go`) workflows.
 
-> Official RayNeo cloud/account features remain disabled in the current beta. Hardware firmware and native device protocols define the capability boundary; see [`.arch/ground_truth.md`](.arch/ground_truth.md) for current verified facts and open items.
+> Official RayNeo cloud/account features remain disabled in the current release. Hardware firmware and native device protocols define the capability boundary; see [`.arch/ground_truth.md`](.arch/ground_truth.md) for current verified facts and open items.
 
 ---
 
@@ -60,10 +60,10 @@ OpenRayneo is an independent open-source companion for **RayNeo iO** smart glass
 
 ### 1. Prebuilt Releases
 
-Download the latest candidate from [GitHub Release v1.2.0-beta.5](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5):
+Download the latest stable release from [GitHub Release v1.2.0](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0):
 
-- **macOS**: Signed Apple Silicon `.zip` app bundle (includes the built-in virtual microphone `.pkg` installer)
-- **Android**: `arm64-v8a` Release APK (uses APK v3 key rotation lineage from `v1.2.0-beta.5` onward for seamless in-place upgrades over earlier debug builds)
+- **macOS**: Signed Apple Silicon `.zip` app bundle (includes the built-in `v0.3.0` virtual microphone `.pkg` installer)
+- **Android**: `arm64-v8a` Release APK (uses APK v3 key rotation lineage from `v1.2.0` onward for seamless in-place upgrades over earlier debug builds)
 - **DSH Go Plugin**: `openrayneo-dsh-0.1.8.tgz`
 
 ### 2. Build & Test from Source

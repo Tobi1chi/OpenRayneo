@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-- 下载：[GitHub Release v1.2.0-beta.5](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5)，含 Mac arm64 zip（1.2.0／21）、Android arm64 release APK（38）和 DSH 插件 `openrayneo-dsh-0.1.8.tgz`（也可在 `integrations/dsh-go` 用 `npm pack` 生成）。
-- Android release 自 1.2.0-beta.5 之后改用 OpenRayneo 正式密钥，并以 APK v3 签名轮换（lineage）从原开发签名过渡：已装旧包的手机可直接覆盖升级、保留配置与记录；升级后旧开发签名的包（含 debug 构建）不能再覆盖，需先卸载。回退用更早的 GitHub Release（同样需卸载）。
+- 下载：[GitHub Release v1.2.0](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0)（正式版），含 Mac arm64 zip（1.2.0／22，内置 CoreAudio `v0.3.0` Universal `.pkg`）、Android arm64 release APK（39）和 DSH 插件 `openrayneo-dsh-0.1.8.tgz`（也可在 `integrations/dsh-go` 用 `npm pack` 生成）。
+- Android release 自 `v1.2.0` 正式版起改用 OpenRayneo 正式密钥，并以 APK v3 签名轮换（lineage）从原开发签名过渡：已装旧包（含 `v1.2.0-beta.5`）的手机可直接覆盖升级、保留配置与记录；升级后旧开发签名的包（含 debug 构建）不能再覆盖，需先卸载。回退用更早的 GitHub Release（同样需卸载）。
 - 本地开发构建按下方命令生成；仓库不提交安装包、模型下载物或私钥，阶段结束后清理 `.build/` 下的构建与候选包。
 
 ## 构建

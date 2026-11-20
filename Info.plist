@@ -15,7 +15,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>21</string>
+	<string>22</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>LSUIElement</key>
@@ -35,6 +35,6 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>OpenRayneo transcribes audio from your glasses on this Mac and displays the text on the glasses.</string>
 	<key>OpenRayneoReleaseVersion</key>
-	<string>1.2.0-beta.5</string>
+	<string>1.2.0</string>
 </dict>
 </plist>

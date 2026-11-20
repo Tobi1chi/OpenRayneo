@@ -13,8 +13,8 @@ android {
         applicationId = "com.openrayneo.android"
         minSdk = 33
         targetSdk = 36
-        versionCode = 38
-        versionName = "1.2.0-beta.5"
+        versionCode = 39
+        versionName = "1.2.0"
         ndk { abiFilters += providers.gradleProperty("openrayneo.abis").orElse("arm64-v8a").get().split(',') }
     }
     buildTypes {

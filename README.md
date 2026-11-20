@@ -11,8 +11,8 @@
 </p>
 
 <p>
-  <a href="https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5"><img src="https://img.shields.io/badge/release-v1.2.0--beta.5-2563eb?style=flat-square" alt="Release" /></a>
-  <img src="https://img.shields.io/badge/macOS-13%2B%20(Apple%20Silicon)-111827?style=flat-square&logo=apple&logoColor=white" alt="macOS" />
+  <a href="https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/release-v1.2.0-2563eb?style=flat-square" alt="Release" /></a>
+  <img src="https://img.shields.io/badge/macOS-15%2B%20(Apple%20Silicon)-111827?style=flat-square&logo=apple&logoColor=white" alt="macOS" />
   <img src="https://img.shields.io/badge/Android-13%2B%20(API%2033%2B)-16a34a?style=flat-square&logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/i18n-%E4%B8%AD%E6%96%87%20%7C%20English-7c3aed?style=flat-square" alt="Languages" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-64748b?style=flat-square" alt="License" /></a>
@@ -40,7 +40,7 @@ OpenRayneo 面向 **RayNeo iO** 智能眼镜，引出设备已有能力，完成
 - **macOS 端（`OpenRayneoBridge`）**：侧重桌面工作流扩展、虚拟麦克风路由、本机 HTTP API 自动化、录音回看与协议测试。
 - **Android 端（`OpenRayneo`）**：侧重日常随身佩戴、高德导航跟随、全天会议/对话记录与手机本机 Agent（DSH Go）协作。
 
-> 当前 Beta 分支停用官方账号／官方云服务；眼镜固件及官方已有协议构成设备能力边界，详见 [实现快照](.arch/ground_truth.md#当前实现与未解决问题)。
+> 当前版本停用官方账号／官方云服务；眼镜固件及官方已有协议构成设备能力边界，详见 [实现快照](.arch/ground_truth.md#当前实现与未解决问题)。
 
 ---
 
@@ -60,10 +60,10 @@ OpenRayneo 面向 **RayNeo iO** 智能眼镜，引出设备已有能力，完成
 
 ### 1. 直接下载预构建包
 
-前往 [GitHub Release v1.2.0-beta.5](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5) 获取：
+前往 [GitHub Release v1.2.0](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0) 获取：
 
-- **macOS**：Apple Silicon 签名 `.zip` 应用包（内置虚拟麦克风 `.pkg` 安装包）
-- **Android**：`arm64-v8a` Release APK（自 `v1.2.0-beta.5` 起使用正式密钥 + APK v3 签名轮换，支持旧开发版无缝覆盖升级）
+- **macOS**：Apple Silicon 签名 `.zip` 应用包（内置虚拟麦克风 `v0.3.0` `.pkg` 安装包）
+- **Android**：`arm64-v8a` Release APK（自 `v1.2.0` 起使用正式密钥 + APK v3 签名轮换，支持旧开发版无缝覆盖升级）
 - **DSH Go 插件**：`openrayneo-dsh-0.1.8.tgz`
 
 ### 2. 从源码构建与测试
