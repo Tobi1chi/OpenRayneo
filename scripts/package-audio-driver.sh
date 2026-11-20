@@ -6,7 +6,14 @@ workspace_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 driver_dir=${OPENRAYNEO_DRIVER_DIR:-"$workspace_dir/.build/audio-driver/OpenRayneoAudio.driver"}
 package_path=${OPENRAYNEO_DRIVER_PACKAGE:-"$workspace_dir/.build/audio-driver/OpenRayneoAudio.pkg"}
 package_work=$(mktemp -d /tmp/openrayneo-driver-package.XXXXXX)
-trap 'rm -rf "$package_work"' EXIT
+cleanup_package_work() {
+    if command -v trash >/dev/null 2>&1; then
+        trash "$package_work" >/dev/null 2>&1 || rm -rf "$package_work"
+    else
+        rm -rf "$package_work"
+    fi
+}
+trap cleanup_package_work EXIT
 package_stage="$package_work/payload"
 package_scripts="$package_work/scripts"
 package_metadata="$package_work/components.plist"

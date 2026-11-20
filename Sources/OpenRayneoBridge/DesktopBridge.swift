@@ -369,7 +369,6 @@ final class DesktopBridge: ObservableObject {
 
     func loadVideo(_ url: URL) {
         guard !videoImporting, !videoPlaying, !busy, !stopping else { return }
-        lastVideoURL = url
         let keepAspect = preserveVideoAspectRatio
         videoImporting = true
         errorMessage = nil
@@ -379,6 +378,7 @@ final class DesktopBridge: ObservableObject {
             do {
                 let video = try await TextVideo.load(url, preserveAspectRatio: keepAspect)
                 try Task.checkCancellation()
+                lastVideoURL = url
                 textVideo = video
                 videoSeconds = 0
                 videoPreview = video.frames[0].text(style: .fullWidth, inverted: false)

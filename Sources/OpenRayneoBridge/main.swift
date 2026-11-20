@@ -246,6 +246,37 @@ enum ProtocolCodec {
         return RemoteMessage(protocolID: protocolID, sequence: UInt16(body[0]) << 8 | UInt16(body[1]), receivedAt: Date(), protobuf: protobuf, version: version, messageType: messageType, json: json, audioData: audioData)
     }
 
+    static func containsCompleteValidFrame(in buffer: Data, startingAfter firstOffset: Int = 1) -> Bool {
+        let count = buffer.count
+        guard count >= firstOffset + 10 else { return false }
+        let base = buffer.startIndex
+        var offset = firstOffset
+        while offset + 10 <= count {
+            let b0 = buffer[base + offset]
+            let b1 = buffer[base + offset + 1]
+            let isData = (b0 == 0xaa && b1 == 0x55)
+            let isAck = (b0 == 0x55 && b1 == 0xaa)
+            if isData || isAck {
+                let length = Int(buffer[base + offset + 2]) << 8 | Int(buffer[base + offset + 3])
+                let frameLength = 4 + length + 2
+                if length >= 4 && offset + frameLength <= count {
+                    if isAck {
+                        if length == 4 {
+                            let body = buffer.subdata(in: (base + offset + 4)..<(base + offset + 8))
+                            let stored = (UInt16(buffer[base + offset + 8]) << 8) | UInt16(buffer[base + offset + 9])
+                            if crc16XModem(body) == stored { return true }
+                        }
+                    } else {
+                        let candidate = buffer.subdata(in: (base + offset)..<(base + offset + frameLength))
+                        if decodeRemoteFrame(candidate) != nil { return true }
+                    }
+                }
+            }
+            offset += 1
+        }
+        return false
+    }
+
     static func firstFieldNumber(_ protobuf: Data) -> UInt64? {
         var offset = 0
         return decodeVarint(protobuf, at: &offset).map { $0 >> 3 }
@@ -685,7 +716,7 @@ private final class BLEReadinessSession: NSObject, CBCentralManagerDelegate, CBP
             }
             let frameLength = 4 + length + 2
             if receiveBuffer.count < frameLength {
-                if receiveBuffer.count > maxFrameBytes {
+                if receiveBuffer.count > maxFrameBytes || ProtocolCodec.containsCompleteValidFrame(in: receiveBuffer) {
                     receiveBuffer.removeFirst()
                     continue
                 }
@@ -1661,7 +1692,7 @@ final class RFCOMMTransport: NSObject {
             }
             let frameLength = 4 + length + 2
             if receiveBuffer.count < frameLength {
-                if receiveBuffer.count > maxFrameBytes {
+                if receiveBuffer.count > maxFrameBytes || ProtocolCodec.containsCompleteValidFrame(in: receiveBuffer) {
                     receiveBuffer = Data(receiveBuffer.dropFirst(1))
                     continue
                 }
@@ -2439,7 +2470,12 @@ private final class LocalHTTPServer {
             while true {
                 let clientFD = Darwin.accept(serverFD, nil, nil)
                 guard clientFD >= 0 else { continue }
-                self.connectionSlots.wait()
+                guard self.connectionSlots.wait(timeout: .now()) == .success else {
+                    self.configureClientSocket(clientFD, timeoutSeconds: 2)
+                    self.writeError(clientFD, status: 503, message: "server busy")
+                    Darwin.close(clientFD)
+                    continue
+                }
                 DispatchQueue.global().async { [weak self] in
                     guard let self else { Darwin.close(clientFD); return }
                     defer { self.connectionSlots.signal() }
@@ -2450,12 +2486,12 @@ private final class LocalHTTPServer {
         while true { RunLoop.current.run(until: Date(timeIntervalSinceNow: 1)) }
     }
 
-    private func configureClientSocket(_ clientFD: Int32) {
+    private func configureClientSocket(_ clientFD: Int32, timeoutSeconds: Int = 15) {
         var noSignal: Int32 = 1
         _ = withUnsafePointer(to: &noSignal) {
             setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, $0, socklen_t(MemoryLayout<Int32>.size))
         }
-        var timeout = timeval(tv_sec: 15, tv_usec: 0)
+        var timeout = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
         _ = withUnsafePointer(to: &timeout) {
             setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, $0, socklen_t(MemoryLayout<timeval>.size))
         }
@@ -2711,9 +2747,13 @@ private final class LocalHTTPServer {
 
     private func readRequest(_ fd: Int32) throws -> HTTPRequest {
         let maxReadLimit = Self.maxHeaderBytes + Self.maxBodyBytes + 4096
+        let deadline = Date().addingTimeInterval(15)
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 8192)
         while data.count <= maxReadLimit {
+            if Date() >= deadline {
+                throw BridgeError(status: 408, message: "request timed out")
+            }
             let received = buffer.withUnsafeMutableBytes { Darwin.recv(fd, $0.baseAddress, $0.count, 0) }
             if received < 0 {
                 if errno == EINTR { continue }
@@ -2731,10 +2771,12 @@ private final class LocalHTTPServer {
     }
 
     private func sendAll(_ fd: Int32, _ data: Data) {
+        let deadline = Date().addingTimeInterval(15)
         data.withUnsafeBytes { rawBuffer in
             guard let base = rawBuffer.baseAddress else { return }
             var totalSent = 0
             while totalSent < rawBuffer.count {
+                if Date() >= deadline { break }
                 let sent = Darwin.send(fd, base.advanced(by: totalSent), rawBuffer.count - totalSent, 0)
                 if sent > 0 {
                     totalSent += sent

@@ -183,24 +183,42 @@ internal class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-                    AppSwitcher.notifyPcHelperIfConfigured(model.config, official = true)
+                    val helperResult = AppSwitcher.notifyPcHelperIfConfigured(model.config, official = true)
+                    if (helperResult is AppSwitcher.HelperOutcome.Failed) {
+                        model.error = L(
+                            "本机切换助手调用失败（${helperResult.message}），请检查助手服务。",
+                            "Local switch helper failed (${helperResult.message}). Check helper service.",
+                        )
+                        return@launch
+                    }
                     startActivity(launch!!)
                     model.notice = L(
                         "已释放眼镜连接并切换到官方 App，无需解绑。",
                         "Released glasses connection and switched to the official RayNeo app without unlinking.",
                     )
                 } else {
-                    AppSwitcher.notifyPcHelperIfConfigured(model.config, official = false)
+                    val helperResult = AppSwitcher.notifyPcHelperIfConfigured(model.config, official = false)
+                    if (helperResult is AppSwitcher.HelperOutcome.Failed) {
+                        model.error = L(
+                            "本机切换助手调用失败（${helperResult.message}），请先在官方 App 中断开眼镜后重试。",
+                            "Local switch helper failed (${helperResult.message}). Disconnect the official app first and retry.",
+                        )
+                        return@launch
+                    }
                     delay(600)
                     if (model.state.glasses.link.phase != LinkPhase.FULL) {
                         runCatching { model.service().connection.showBonded() }
                         val choices = model.state.devices
-                        val selected = choices.firstOrNull { it.bluetooth.address == model.lastGlassesAddress }
-                            ?: choices.singleOrNull()
+                        val savedAddress = model.lastGlassesAddress
+                        val selected = if (savedAddress.isNotBlank()) {
+                            choices.firstOrNull { it.bluetooth.address == savedAddress }
+                        } else {
+                            choices.singleOrNull()
+                        }
                         if (selected != null) model.connect(selected, false)
                         else model.notice = L(
-                            "已准备切回 OpenRayneo，请点击连接并选择你的眼镜。",
-                            "Ready to reconnect OpenRayneo. Tap Connect and select your glasses.",
+                            "未找到上次连接的眼镜；请确认官方 App 已释放连接，再点“连接眼镜”手动选择。",
+                            "Saved glasses not found. Ensure the official app released the link, then tap Connect to choose.",
                         )
                     } else {
                         model.notice = L("OpenRayneo 已连接眼镜。", "OpenRayneo is already connected to your glasses.")
