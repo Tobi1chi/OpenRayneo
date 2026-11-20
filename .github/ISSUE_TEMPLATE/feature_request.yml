@@ -1,0 +1,32 @@
+name: Feature Request or Community Share / 功能建议与社区分享
+description: Suggest a new capability or share a fork/integration / 提出新功能想法，或分享你的衍生项目与集成
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Target Platform / 涉及平台
+      options:
+        - macOS
+        - Android
+        - Both macOS & Android
+        - CoreAudio Driver / Protocol / Docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Use case or motivation / 使用场景与背景
+      placeholder: What workflow or problem are you trying to solve? / 你希望解决什么场景或痛点？
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution or links / 建议方案或项目链接
+      placeholder: Describe the desired behavior, protocol notes, or link to a prototype/fork.
+    validations:
+      required: true

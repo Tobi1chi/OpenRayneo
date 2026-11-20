@@ -1,0 +1,79 @@
+name: Bug Report / 问题反馈
+description: Report a Bluetooth, display, audio, or app issue / 反馈蓝牙连接、显示、音频或应用问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve OpenRayneo! Please fill in the environment details below (and redact any API tokens or private audio paths).
+        感谢反馈！请尽量补充以下环境信息，并注意隐藏任何 API Token 或敏感日志。
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform / 平台
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Android
+        - Both macOS & Android
+    validations:
+      required: true
+
+  - type: input
+    id: app_version
+    attributes:
+      label: OpenRayneo Version / OpenRayneo 版本
+      placeholder: "e.g. v1.2.0-beta.5 or commit hash"
+    validations:
+      required: true
+
+  - type: input
+    id: os_device
+    attributes:
+      label: OS & Device / 系统与设备型号
+      placeholder: "e.g. macOS 15.3 (M3 Pro) / Android 16 (Pixel 9 / Xiaomi 14)"
+    validations:
+      required: true
+
+  - type: input
+    id: glasses_firmware
+    attributes:
+      label: Glasses Model & Firmware / 眼镜型号与固件版本
+      placeholder: "e.g. RayNeo iO, firmware 1.0.4.12"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: official_app
+    attributes:
+      label: Official RayNeo App Status / 官方 App 连接状态
+      description: Is the official RayNeo app installed or connected on another device? / 官方 App 是否同时连着眼镜？
+      options:
+        - Disconnected / 已断开或未连接
+        - Connected on phone / 手机官方 App 同时连接中
+        - Not installed / 未安装
+        - Unsure / 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened & steps to reproduce / 问题描述与复现步骤
+      placeholder: |
+        1. Connect glasses via ...
+        2. Click ...
+        3. Observed error message: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostic logs or error codes / 诊断日志或错误码
+      description: Paste relevant logs or exact error messages (redact tokens). / 请粘贴报错文案或诊断日志（隐藏凭据）。
+      render: text
+    validations:
+      required: false
