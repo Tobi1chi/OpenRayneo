@@ -49,9 +49,38 @@ internal class GlassesDeviceSettings(private val requests: GlassesRequests, priv
         apply("crown_config", 5, 6, payload(value = direction, data = JSONObject().put("double", double).put("longPress", longPress).toString()), "crownConfig") { s ->
             s.settings.optJSONObject("crownConfig")?.let { it.deviceInt("direction") == direction && it.deviceInt("double") == double && it.deviceInt("longPress") == longPress } == true }
     }
-    fun language(value: String) {
+    fun language(value: String, onConfirmed: (() -> Unit)? = null) {
         require(state.settings.optJSONArray("supportedLanguages")?.let { a -> (0 until a.length()).any { a.getString(it) == value } } == true)
-        apply("language_change", 5, 6, payload(data = JSONObject().put("currentLang", value).toString()), "currentLang") { it.settings.optString("currentLang") == value }
+        apply(
+            "language_change",
+            5,
+            6,
+            payload(data = JSONObject().put("currentLang", value).toString()),
+            "currentLang",
+            matches = { it.settings.optString("currentLang") == value },
+            onConfirmed = onConfirmed,
+        )
+    }
+
+    fun syncLanguageForApp(isEnglish: Boolean) {
+        if (state.busy) return
+        perform {
+            if (!state.loaded) readAll()
+            val supportedArray = state.settings.optJSONArray("supportedLanguages")
+                ?: return@perform state.notice
+            val supported = (0 until supportedArray.length()).map { supportedArray.getString(it) }
+            val target = AppLanguage.preferredGlassesLanguage(isEnglish, supported)
+                ?: return@perform state.notice
+            val current = state.settings.optString("currentLang").trim()
+            if (current.equals(target, ignoreCase = true)) return@perform state.notice
+            applyBlocking(
+                "language_change",
+                5,
+                6,
+                payload(data = JSONObject().put("currentLang", target).toString()),
+                "currentLang",
+            ) { it.settings.optString("currentLang").equals(target, ignoreCase = true) }
+        }
     }
     fun privacy(values: Map<String, Boolean>) {
         val data = JSONObject(checkNotNull(state.settings.optJSONObject("privacyConfig")).toString())
@@ -68,9 +97,19 @@ internal class GlassesDeviceSettings(private val requests: GlassesRequests, priv
         apply("system_unints_config", 5, 6, payload(data = data.toString()), "systemUnitsConfig") { s -> s.settings.optJSONObject("systemUnitsConfig")?.let {
             it.deviceInt("time_format") == time && it.deviceInt("temp_unit") == temperature && it.deviceInt("measurement") == measurement } == true }
     }
-    private fun apply(command: String, type: Int, reply: Int, payload: JSONObject, field: String, matches: (DeviceSettingsState) -> Boolean) {
+    private fun apply(
+        command: String,
+        type: Int,
+        reply: Int,
+        payload: JSONObject,
+        field: String,
+        onConfirmed: (() -> Unit)? = null,
+        matches: (DeviceSettingsState) -> Boolean,
+    ) {
         check(state.loaded)
-        perform { applyBlocking(command, type, reply, payload, field, matches) }
+        perform(onDone = { if (matches(state)) onConfirmed?.invoke() }) {
+            applyBlocking(command, type, reply, payload, field, matches)
+        }
     }
     private fun applyBlocking(command: String, type: Int, reply: Int, payload: JSONObject, field: String,
                               matches: (DeviceSettingsState) -> Boolean): String {
@@ -102,11 +141,12 @@ internal class GlassesDeviceSettings(private val requests: GlassesRequests, priv
             JSONObject().put("message", message).put("status", state.status).put("settings", state.settings)
         }, completion)
     }
-    private fun perform(work: () -> String) {
+    private fun perform(onDone: (() -> Unit)? = null, work: () -> String) {
         check(!state.busy) { "请等待当前设备操作" }
         state = state.copy(busy = true, notice = "正在与眼镜同步…"); changed()
         requests.perform(work) { result ->
             state = state.copy(busy = false, notice = result.getOrElse { it.message ?: "设备操作失败" }); changed()
+            if (result.isSuccess) onDone?.invoke()
         }
     }
     fun observe(type: Int, body: JSONObject) {

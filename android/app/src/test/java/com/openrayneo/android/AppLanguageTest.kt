@@ -4,6 +4,7 @@ package com.openrayneo.android
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,5 +33,19 @@ class AppLanguageTest {
         } finally {
             AppLanguage.setForTest(AppLanguageMode.SYSTEM)
         }
+    }
+
+    @Test
+    fun mapsAppAndGlassesLanguagesSafely() {
+        val supported = listOf("zh-CN", "en-US", "ja-JP")
+        assertEquals("en-US", AppLanguage.preferredGlassesLanguage(isEnglish = true, supported = supported))
+        assertEquals("zh-CN", AppLanguage.preferredGlassesLanguage(isEnglish = false, supported = supported))
+        assertEquals("en-GB", AppLanguage.preferredGlassesLanguage(isEnglish = true, supported = listOf("en-GB")))
+        assertNull(AppLanguage.preferredGlassesLanguage(isEnglish = true, supported = listOf("zh-CN")))
+        assertNull(AppLanguage.preferredGlassesLanguage(isEnglish = false, supported = emptyList()))
+
+        assertEquals(AppLanguageMode.ZH, AppLanguage.appModeForGlassesLanguage("zh-CN"))
+        assertEquals(AppLanguageMode.EN, AppLanguage.appModeForGlassesLanguage("en-US"))
+        assertNull(AppLanguage.appModeForGlassesLanguage("ja-JP"))
     }
 }

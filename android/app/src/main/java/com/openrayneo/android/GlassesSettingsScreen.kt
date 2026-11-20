@@ -104,9 +104,9 @@ internal fun GlassesSettingsScreen(model: AppModel) {
             settings.optJSONArray("supportedLanguages")?.let { languages ->
                 val choices = (0 until languages.length()).map { languages.getString(it) }
                 var language by remember(settings.optString("currentLang")) { mutableStateOf(settings.optString("currentLang")) }
-                if (choices.isNotEmpty() && language.isNotBlank()) SettingsSection("系统语言") {
+                if (choices.isNotEmpty() && language.isNotBlank()) SettingsSection(L("系统语言", "System Language")) {
                     choices.forEach { option -> FilterChip(language == option, { language = option }, label = { Text(option) }, enabled = editable) }
-                    ToolButton(onClick = { model.attempt { model.service().deviceSettings.language(language) } }, enabled = editable) { Text("应用语言") }
+                    ToolButton(onClick = { model.applyGlassesLanguage(language) }, enabled = editable) { Text(L("应用语言", "Apply Language")) }
                 }
             }
             settings.optJSONObject("privacyConfig")?.let { privacy ->
