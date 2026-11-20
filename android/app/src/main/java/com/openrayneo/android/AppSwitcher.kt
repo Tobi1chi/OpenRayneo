@@ -18,6 +18,12 @@ internal object AppSwitcher {
     val OFFICIAL_PACKAGES = listOf("com.rayneo.venus", "com.rayneo.venus.pub")
     private val http = OkHttpClient.Builder().callTimeout(10, TimeUnit.SECONDS).build()
 
+    sealed interface HelperOutcome {
+        data object NotConfigured : HelperOutcome
+        data object Succeeded : HelperOutcome
+        data class Failed(val message: String) : HelperOutcome
+    }
+
     fun findOfficialLaunchIntent(packageManager: PackageManager): Intent? {
         for (pkg in OFFICIAL_PACKAGES) {
             packageManager.getLaunchIntentForPackage(pkg)?.let { return it }
@@ -25,31 +31,36 @@ internal object AppSwitcher {
         return null
     }
 
+    /**
+     * Requires dedicated switchHelperUrl (loopback HTTP) and switchHelperToken settings;
+     * never reuses or transmits the desktop Codex capability token.
+     */
     fun hasPcSwitchHelper(config: JSONObject): Boolean {
-        val rawUrl = config.optString("codexUrl").trim()
-        val token = config.optString("codexToken").trim()
+        val rawUrl = config.optString("switchHelperUrl").trim()
+        val token = config.optString("switchHelperToken").trim()
         if (rawUrl.isEmpty() || token.isEmpty()) return false
         val uri = runCatching { URI(rawUrl) }.getOrNull() ?: return false
-        return uri.scheme == "ws" && uri.host in setOf("127.0.0.1", "localhost") && uri.port == 4500
+        return uri.scheme == "http" && uri.host in setOf("127.0.0.1", "localhost", "::1") && uri.port in 1..65535
     }
 
-    /**
-     * Notifies the optional local PC/ADB helper on port 4501 when configured; returns true if
-     * the helper accepted the switch, or false if no helper is configured (standalone mode).
-     */
-    suspend fun notifyPcHelperIfConfigured(config: JSONObject, official: Boolean): Boolean =
+    suspend fun notifyPcHelperIfConfigured(config: JSONObject, official: Boolean): HelperOutcome =
         withContext(Dispatchers.IO) {
-            if (!hasPcSwitchHelper(config)) return@withContext false
-            val uri = URI(config.optString("codexUrl").trim())
-            val token = config.optString("codexToken").trim()
+            if (!hasPcSwitchHelper(config)) return@withContext HelperOutcome.NotConfigured
+            val rawUrl = config.optString("switchHelperUrl").trim().trimEnd('/')
+            val token = config.optString("switchHelperToken").trim()
             val body = JSONObject().put("owner", if (official) "official" else "openrayneo").toString()
             val request = Request.Builder()
-                .url("http://${uri.host}:4501/switch")
+                .url("$rawUrl/switch")
                 .header("Authorization", "Bearer $token")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             runCatching {
-                http.newCall(request).execute().use { it.isSuccessful }
-            }.getOrDefault(false)
+                http.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) HelperOutcome.Succeeded
+                    else HelperOutcome.Failed("HTTP ${response.code}")
+                }
+            }.getOrElse { error ->
+                HelperOutcome.Failed(error.message ?: error.javaClass.simpleName)
+            }
         }
 }

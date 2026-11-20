@@ -337,7 +337,7 @@ private fun GlassesScreen(
                     ) {
                         Text(if (model.switchingApps) L("切换中…", "Switching…") else L("切换官方 App", "Official RayNeo App"))
                     }
-                    if (!linked) {
+                    if (!reachable) {
                         ToolOutlinedButton(
                             onClick = { actions.switchOfficialApp(false) },
                             enabled = !model.switchingApps && !busy,

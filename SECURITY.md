@@ -12,7 +12,9 @@
 
 OpenRayneo 涉及蓝牙设备控制、麦克风录音、本机 HTTP/Agent API 及加密配置，遵循以下安全基线：
 
-1. **本机接口默认仅限回环**：macOS Bridge（`127.0.0.1:8765`）与 Android 本机 Agent 服务（`127.0.0.1:8766`）默认仅监听回环地址，除 `/health` 外均要求常量时间校验 Bearer Token，并校验 `Host` 头防御 DNS Rebinding。
+1. **本机接口默认仅限回环**：
+   - macOS Bridge（`127.0.0.1:8765`）默认仅监听回环地址，除 `/health` 外均要求常量时间校验 Bearer Token，并校验 `Host` 头防御 DNS Rebinding。
+   - Android 本机 Agent 服务（`127.0.0.1:8766`）默认仅监听回环地址，所有路由均要求 Bearer Token 鉴权并拒绝带 `Origin` 头的浏览器跨站请求（无未鉴权健康检查路由）。
 2. **用户数据留在本地**：录音文件、声纹参考、Android Keystore 密钥与 macOS Keychain 凭据均保存在用户本机，除非用户显式配置外部模型接口或局域网同步，否则不会上传。
 3. **禁止泄露凭据**：切勿在 Issue、PR 或日志截图中暴露真实 Bearer Token、模型 API Key、签名密钥库（`.jks` / `.lineage`）或个人敏感录音。
 
@@ -37,7 +39,9 @@ OpenRayneo 涉及蓝牙设备控制、麦克风录音、本机 HTTP/Agent API �
 
 OpenRayneo handles sensitive local capabilities—Bluetooth device control, microphone audio, local HTTP/Agent APIs, and encrypted settings. Our baseline security guarantees are:
 
-1. **Loopback-only local APIs by default**: The macOS bridge (`127.0.0.1:8765`) and Android local Agent server (`127.0.0.1:8766`) bind to loopback interfaces only, require constant-time Bearer token authentication on all non-`/health` routes, and reject non-loopback `Host` headers to mitigate DNS rebinding.
+1. **Loopback-only local APIs by default**:
+   - The macOS bridge (`127.0.0.1:8765`) binds to loopback only, requires constant-time Bearer token authentication on all non-`/health` routes, and validates `Host` headers to mitigate DNS rebinding.
+   - The Android local Agent server (`127.0.0.1:8766`) binds to loopback only, requires Bearer token authentication on all routes (no unauthenticated health route), and rejects requests carrying an `Origin` header.
 2. **Local-only sensitive data**: User recordings, voiceprint references, Android Keystore keys, and macOS Keychain credentials stay on the user's device and are never uploaded by OpenRayneo unless the user explicitly configures an external endpoint or LAN record sync.
 3. **No secrets in source control**: Release signing keystores (`.jks`), v3 rotation lineages, Keychain passwords, and API tokens must never be committed or posted in issues/PRs.
 
