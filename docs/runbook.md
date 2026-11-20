@@ -2,14 +2,11 @@
 
 目标、模块和当前完成度统一见 [架构事实](../.arch/ground_truth.md) 与 [看板](../.arch/dashboard.html)。本页只维护可直接操作的安装、运行与恢复步骤。
 
-## 当前本地候选
+## 当前版本
 
-- Mac：[唤醒轮自动更新本人声纹应用](../.build/native-self-learning/OpenRayneoBridge.app)（含原生唤醒默认本人、声纹0.50与实时双麦WAV）；上一版位于 `.build/native-wake-self/`。
-- Android：[38 release](../android/app/build/outputs/candidates/android38-1.2.0-beta.5/OpenRayneo-v38-release.apk)、[38 debug](../android/app/build/outputs/candidates/android38-1.2.0-beta.5/OpenRayneo-v38-debug.apk)，版本 `1.2.0-beta.5`（唤醒轮自动更新本人声纹、原生唤醒默认本人、声纹门槛0.50）；同签名覆盖37。
-- DSH：[插件0.1.8](../android/app/build/outputs/candidates/android37-1.2.0-beta.4/openrayneo-dsh-0.1.8.tgz)。Android36及之后沿用该版插件。
-- Android回退：[37 release](../android/app/build/outputs/candidates/android37-1.2.0-beta.4/OpenRayneo-v37-release.apk)、[36 release](../android/app/build/outputs/candidates/android36-1.2.0-beta.3/OpenRayneo-v36-release.apk)。同签名覆盖安装保留配置与记录，私有库与Keystore一起保留。
-
-正式下载见 GitHub Release `v1.2.0-beta.5`（Mac arm64 zip、Android arm64 release APK）。本页其余路径是开发机产物，构建后可能已清理；当前源码构建以本页命令为准，仓库不提交安装包、模型下载物或私钥。
+- 下载：[GitHub Release v1.2.0-beta.5](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5)，含 Mac arm64 zip（1.2.0／21）、Android arm64 release APK（38）和 DSH 插件 `openrayneo-dsh-0.1.8.tgz`（也可在 `integrations/dsh-go` 用 `npm pack` 生成）。
+- Android 沿用原开发签名，同签名覆盖安装保留配置与记录，私有库与Keystore一起保留；回退用更早的 GitHub Release。
+- 本地开发构建按下方命令生成；仓库不提交安装包、模型下载物或私钥，阶段结束后清理 `.build/` 下的构建与候选包。
 
 ## 构建
 
