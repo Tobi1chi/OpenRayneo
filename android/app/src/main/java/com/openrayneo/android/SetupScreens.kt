@@ -264,55 +264,75 @@ internal fun SettingsScreen(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SectionLabel("连接你的服务")
+        SectionLabel(L("连接你的服务", "Connected Services"))
         SettingsRow(
-            "记录总结模型",
-            if (!model.mobileModelConfigured) "尚未配置"
-            else model.config.optString("modelName").ifBlank { "已保存配置" },
+            L("记录总结模型", "Summary Model"),
+            if (!model.mobileModelConfigured) L("尚未配置", "Not configured")
+            else model.config.optString("modelName").ifBlank { L("已保存配置", "Saved") },
             Icons.Outlined.Smartphone,
         ) {
             open("model")
         }
         SettingsRow(
-            "电脑 Codex",
-            if (model.state.computerConnected) "已连接" else "连接参数与配置导入",
+            L("电脑 Codex", "Desktop Codex"),
+            if (model.state.computerConnected) L("已连接", "Connected") else L("连接参数与配置导入", "Connection settings & config import"),
             Icons.Outlined.Computer,
         ) {
             open("computer")
         }
-        SettingsRow("DSH Go 与外部 Agent", "语音派任务、眼镜工具与本机API", Icons.Outlined.Hub) { open("agent-api") }
-        SectionLabel("权限与设备")
-        SettingsRow("语音与总结", "眼镜ASR、人物分析与记录总结", Icons.Outlined.Mic) { open("voice-settings") }
-        SettingsRow("眼镜设置", "亮度、画面位置与唤醒", Icons.Outlined.Settings) { open("device-settings") }
-        SettingsRow("首页与内容", "小组件、待办、日程与天气", Icons.Outlined.Dashboard) { open("content") }
-        SettingsRow("提词稿库", "本地稿件、眼镜播放与控制", Icons.Outlined.Description) { open("teleprompter") }
-        SettingsRow("声音与人物", "本人登记、联系人与声音档案", Icons.Outlined.People) { open("voice-profiles") }
+        SettingsRow(L("DSH Go 与外部 Agent", "DSH Go & External Agents"), L("语音派任务、眼镜工具与本机API", "Voice delegation, glasses tools & local API"), Icons.Outlined.Hub) { open("agent-api") }
+        SectionLabel(L("权限与设备", "Permissions & Device"))
+        SettingsRow(L("语音与总结", "Voice & Summary"), L("眼镜ASR、人物分析与记录总结", "Glasses ASR, speaker profiles & summaries"), Icons.Outlined.Mic) { open("voice-settings") }
+        SettingsRow(L("眼镜设置", "Glasses Settings"), L("亮度、画面位置与唤醒", "Brightness, display position & wake"), Icons.Outlined.Settings) { open("device-settings") }
+        SettingsRow(L("首页与内容", "Home & Content"), L("小组件、待办、日程与天气", "Widgets, todos, calendar & weather"), Icons.Outlined.Dashboard) { open("content") }
+        SettingsRow(L("提词稿库", "Teleprompter Library"), L("本地稿件、眼镜播放与控制", "Local scripts, playback & controls"), Icons.Outlined.Description) { open("teleprompter") }
+        SettingsRow(L("声音与人物", "Voice & Speakers"), L("本人登记、联系人与声音档案", "Self enrollment, contacts & voice profiles"), Icons.Outlined.People) { open("voice-profiles") }
         SettingsRow(
-            "附近设备",
-            if (model.bluetoothAllowed) "已授权" else "连接眼镜时需要",
+            L("附近设备", "Nearby Devices"),
+            if (model.bluetoothAllowed) L("已授权", "Granted") else L("连接眼镜时需要", "Required to connect glasses"),
             Icons.Outlined.Bluetooth,
         ) {
             actions.appSettings()
         }
         SettingsRow(
-            "高德通知使用权",
-            if (model.notificationAllowed) "已授权 · ${model.state.notificationReadStatus}"
-            else "导航跟随时需要",
+            L("高德通知使用权", "Navigation Notification Access"),
+            if (model.notificationAllowed) L("已授权 · ${model.state.notificationReadStatus}", "Granted · ${model.state.notificationReadStatus}")
+            else L("导航跟随时需要", "Required for turn-by-turn following"),
             Icons.Outlined.NotificationsNone,
             actions.notificationAccess,
         )
         SettingsRow(
-            "后台状态通知",
-            if (model.backgroundNotifications) "已允许" else "可选，查看后台连接状态",
+            L("后台状态通知", "Background Status Notification"),
+            if (model.backgroundNotifications) L("已允许", "Allowed") else L("可选，查看后台连接状态", "Optional, shows background connection status"),
             Icons.Outlined.NotificationsActive,
         ) {
             if (model.backgroundNotifications) actions.appSettings()
             else actions.notificationPermission()
         }
-        SettingsRow("设备与诊断", "连接日志、测试通知与音频恢复", Icons.Outlined.Tune) { open("diagnostics") }
-        SectionLabel("外观")
+        SettingsRow(L("设备与诊断", "Device & Diagnostics"), L("连接日志、测试通知与音频恢复", "Logs, test notifications & audio recovery"), Icons.Outlined.Tune) { open("diagnostics") }
+        SectionLabel(L("语言", "Language"))
         ContentCard {
-            listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色").forEach { (key, title) ->
+            listOf(
+                "system" to L("跟随系统", "Follow system"),
+                "zh" to "简体中文",
+                "en" to "English",
+            ).forEach { (key, title) ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = model.language == key,
+                        onClick = { model.changeLanguage(key) },
+                    )
+                    TextButton(onClick = { model.changeLanguage(key) }) { Text(title) }
+                }
+            }
+        }
+        SectionLabel(L("外观", "Appearance"))
+        ContentCard {
+            listOf(
+                "system" to L("跟随系统", "Follow system"),
+                "light" to L("浅色", "Light"),
+                "dark" to L("深色", "Dark"),
+            ).forEach { (key, title) ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(
                         selected = model.appearance == key,
@@ -322,10 +342,13 @@ internal fun SettingsScreen(
                 }
             }
         }
-        SectionLabel("了解 OpenRayneo")
-        SettingsRow("再看一次使用引导", "连接眼镜、导航演示与助手配置", Icons.Outlined.Explore, replay)
+        SectionLabel(L("了解 OpenRayneo", "About OpenRayneo"))
+        SettingsRow(L("再看一次使用引导", "Replay Onboarding"), L("连接眼镜、导航演示与助手配置", "Glasses pairing, navigation demo & assistant setup"), Icons.Outlined.Explore, replay)
         Note(
-            "OpenRayneo ${BuildConfig.VERSION_NAME}\n记录音频在手机加密保存，转写与说话人分析完成后交付。系统语音输入使用手机识别服务。",
+            L(
+                "OpenRayneo ${BuildConfig.VERSION_NAME}\n记录音频在手机加密保存，转写与说话人分析完成后交付。系统语音输入使用手机识别服务。",
+                "OpenRayneo ${BuildConfig.VERSION_NAME}\nRecorded audio is encrypted locally on your phone; transcripts and speaker analysis are delivered after processing. System voice input uses your phone's speech service.",
+            ),
             Modifier.padding(vertical = 12.dp),
         )
     }

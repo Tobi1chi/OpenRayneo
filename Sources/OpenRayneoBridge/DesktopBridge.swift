@@ -882,10 +882,16 @@ final class DesktopBridge: ObservableObject {
             if response["acknowledged"] as? Bool == true {
                 let reply = response["reply"] as? [String: Any]
                 let code = (reply?["code"] as? NSNumber)?.intValue
-                let detail = code.map { "（错误码 \($0)）" } ?? ""
-                throw DesktopError(message: "眼镜拒绝了显示启动请求\(detail)，请确认眼镜已展开且未被其他模式占用后重试。")
+                let detail = code.map { L("（错误码 \($0)）", " (code \($0))") } ?? ""
+                throw DesktopError(message: L(
+                    "眼镜拒绝了显示启动请求\(detail)，请确认眼镜已展开且未被其他模式占用后重试。",
+                    "Glasses rejected the display start request\(detail). Ensure the glasses are unfolded and idle, then retry."
+                ))
             }
-            throw DesktopError(message: "未收到眼镜的显示启动确认（等待超时），请确认眼镜蓝牙连接正常并重试。")
+            throw DesktopError(message: L(
+                "未收到眼镜的显示启动确认（等待超时），请确认眼镜蓝牙连接正常并重试。",
+                "Timed out waiting for display start confirmation from the glasses. Check Bluetooth and retry."
+            ))
         }
         activeSession = mode
         if mode == .prompts { updateAudio(response) }
