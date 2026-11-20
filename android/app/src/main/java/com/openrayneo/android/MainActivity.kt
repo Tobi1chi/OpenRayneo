@@ -14,6 +14,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 
 internal class MainActivity : ComponentActivity() {
@@ -141,8 +146,60 @@ internal class MainActivity : ComponentActivity() {
                                 )
                             }
                         },
+                        switchOfficialApp = { official -> switchGlassesApp(official) },
                     ),
                 )
+            }
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun switchGlassesApp(official: Boolean) {
+        if (model.switchingApps) return
+        if (!official && !model.bluetoothAllowed) {
+            model.error = "连接眼镜需要附近设备权限，请先在设置中授权。"
+            return
+        }
+        val launch = if (official) AppSwitcher.findOfficialLaunchIntent(packageManager) else null
+        if (official && launch == null) {
+            model.error = "未检测到已安装的雷鸟官方 App（com.rayneo.venus / com.rayneo.venus.pub）。"
+            return
+        }
+        model.switchingApps = true
+        lifecycleScope.launch {
+            try {
+                if (official) {
+                    runCatching { model.service().disconnect() }
+                    runCatching {
+                        withTimeout(8000) {
+                            while (model.state.glasses.link.phase != LinkPhase.DISCONNECTED || model.state.glasses.disconnecting) {
+                                delay(100)
+                            }
+                        }
+                    }
+                    AppSwitcher.notifyPcHelperIfConfigured(model.config, official = true)
+                    startActivity(launch!!)
+                    model.notice = "已释放眼镜连接并切换到官方 App，无需解绑。"
+                } else {
+                    AppSwitcher.notifyPcHelperIfConfigured(model.config, official = false)
+                    delay(600)
+                    if (model.state.glasses.link.phase != LinkPhase.FULL) {
+                        runCatching { model.service().connection.showBonded() }
+                        val choices = model.state.devices
+                        val selected = choices.firstOrNull { it.bluetooth.address == model.lastGlassesAddress }
+                            ?: choices.singleOrNull()
+                        if (selected != null) model.connect(selected, false)
+                        else model.notice = "已准备切回 OpenRayneo，请点击连接并选择你的眼镜。"
+                    } else {
+                        model.notice = "OpenRayneo 已连接眼镜。"
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                model.error = error.message ?: "切换 App 失败"
+            } finally {
+                model.switchingApps = false
             }
         }
     }
@@ -170,4 +227,5 @@ internal data class UiActions(
     val openGaode: () -> Unit,
     val importConfig: () -> Unit,
     val voice: (AnswerSource) -> Unit,
+    val switchOfficialApp: (Boolean) -> Unit,
 )

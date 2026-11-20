@@ -99,7 +99,11 @@ internal class PromptAudio(private val consume: (ShortArray, ShortArray) -> Unit
                 val decoder = codec ?: return@post
                 // RFC 6716 §2.1.2 permits mono-coded frames inside a stereo input stream.
                 // Do not drop or infer physical channel roles from the packet's TOC stereo bit.
-                val duration = packetDurationUs(packet)
+                val duration = packetDurationUs(packet) ?: run {
+                    val totalDropped = dropped.incrementAndGet()
+                    publish(current) { it.copy(dropped = totalDropped) }
+                    return@post
+                }
                 drain(decoder, current)
                 val index = decoder.dequeueInputBuffer(5_000)
                 if (index < 0) { dropped.incrementAndGet(); return@post }
@@ -165,14 +169,25 @@ internal class PromptAudio(private val consume: (ShortArray, ShortArray) -> Unit
     }
     private fun release() { codec?.let { runCatching { it.stop() }; runCatching { it.release() } }; codec = null }
 
-    private fun packetDurationUs(packet: ByteArray): Long {
-        val toc = packet[0].toInt() and 255
-        val frameUs = when {
-            toc and 128 != 0 -> 2_500L shl ((toc ushr 3) and 3)
-            toc and 96 == 96 -> if (toc and 8 != 0) 20_000L else 10_000L
-            else -> (10_000L shl ((toc ushr 3) and 3)).coerceAtMost(60_000L)
+    companion object {
+        internal fun packetDurationUs(packet: ByteArray): Long? {
+            if (packet.isEmpty()) return null
+            val toc = packet[0].toInt() and 255
+            val frameUs = when {
+                toc and 128 != 0 -> 2_500L shl ((toc ushr 3) and 3)
+                toc and 96 == 96 -> if (toc and 8 != 0) 20_000L else 10_000L
+                else -> (10_000L shl ((toc ushr 3) and 3)).coerceAtMost(60_000L)
+            }
+            val count = when (toc and 3) {
+                0 -> 1
+                3 -> {
+                    if (packet.size < 2) return null
+                    packet[1].toInt() and 63
+                }
+                else -> 2
+            }
+            if (count !in 1..48) return null
+            return frameUs * count
         }
-        val count = when (toc and 3) { 0 -> 1; 3 -> packet[1].toInt() and 63; else -> 2 }
-        return frameUs * count
     }
 }

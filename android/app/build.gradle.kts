@@ -33,6 +33,7 @@ android {
     androidResources { noCompress += "onnx" }
     sourceSets.getByName("main").assets.srcDir("../../ThirdParty/SherpaOnnx")
     sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/glasses-model"))
+    sourceSets.getByName("test").resources.srcDir("../../Tests/Fixtures")
 }
 
 // The live 3D glasses load the shared model from assets/models; only the glb ships in the APK.
@@ -77,4 +78,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
