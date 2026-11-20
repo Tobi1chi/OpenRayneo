@@ -254,15 +254,21 @@ final class GlassesSettingsModel: ObservableObject {
             await refresh(force: false)
         }
         guard loaded, !busy else { return }
+        let isEnglish = AppLanguageStore.currentIsEnglish()
         let supported = settings["supportedLanguages"] as? [String] ?? []
-        guard let target = AppLanguageStore.preferredGlassesLanguage(
-            isEnglish: AppLanguageStore.currentIsEnglish(),
-            supported: supported
-        ) else { return }
-        let current = (settings["language"] as? String ?? language).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard current.caseInsensitiveCompare(target) != .orderedSame else { return }
-        language = target
-        await control("language_change", data: ["currentLang": target])
+        if let target = AppLanguageStore.preferredGlassesLanguage(isEnglish: isEnglish, supported: supported) {
+            let current = (settings["language"] as? String ?? language).trimmingCharacters(in: .whitespacesAndNewlines)
+            if current.caseInsensitiveCompare(target) != .orderedSame {
+                language = target
+                await control("language_change", data: ["currentLang": target])
+            }
+        }
+        let targetWakeWord = AppLanguageStore.preferredWakeWordMode(isEnglish: isEnglish)
+        let currentWakeWord = (settings["voiceAssistantConfig"] as? [String: Any])?["wakeupWord"] as? Int ?? voiceWakeWord
+        if currentWakeWord != targetWakeWord {
+            voiceWakeWord = targetWakeWord
+            await assistant("set_ai_wakeup_word", mode: targetWakeWord)
+        }
     }
 
     func applyLanguageAndSyncApp() async {
@@ -272,6 +278,12 @@ final class GlassesSettingsModel: ObservableObject {
         let confirmed = (settings["language"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard confirmed.caseInsensitiveCompare(requested) == .orderedSame,
               let nextMode = AppLanguageStore.appMode(forGlassesLanguage: confirmed) else { return }
+        let targetWakeWord = AppLanguageStore.preferredWakeWordMode(isEnglish: nextMode == .en)
+        let currentWakeWord = (settings["voiceAssistantConfig"] as? [String: Any])?["wakeupWord"] as? Int ?? voiceWakeWord
+        if currentWakeWord != targetWakeWord {
+            voiceWakeWord = targetWakeWord
+            await assistant("set_ai_wakeup_word", mode: targetWakeWord)
+        }
         if AppLanguageStore.shared.mode != nextMode {
             AppLanguageStore.shared.mode = nextMode
         }
@@ -445,12 +457,12 @@ struct GlassesSettingsPanel: View {
                         HStack { Toggle("助手开关", isOn: $model.voiceState); Button("应用") { Task { await model.assistant("set_ai_state", mode: model.voiceState ? 1 : 0) } } }
                         HStack { Toggle("对话打断", isOn: $model.voiceInterrupt); Button("应用") { Task { await model.assistant("set_ai_work_mode", mode: model.voiceInterrupt ? 1 : 0) } } }
                         HStack {
-                            Picker("唤醒词", selection: $model.voiceWakeWord) {
+                            Picker(L("唤醒词", "Wake Word"), selection: $model.voiceWakeWord) {
                                 Text("小雷小雷").tag(1)
                                 Text("OK RayNeo / Hey RayNeo").tag(2)
-                                if ![1, 2].contains(model.voiceWakeWord) { Text("设备值 \(model.voiceWakeWord)").tag(model.voiceWakeWord) }
+                                if ![1, 2].contains(model.voiceWakeWord) { Text(L("设备值 \(model.voiceWakeWord)", "Device value \(model.voiceWakeWord)")).tag(model.voiceWakeWord) }
                             }
-                            Button("应用唤醒词") { Task { await model.assistant("set_ai_wakeup_word", mode: model.voiceWakeWord) } }
+                            Button(L("应用唤醒词", "Apply Wake Word")) { Task { await model.assistant("set_ai_wakeup_word", mode: model.voiceWakeWord) } }
                                 .disabled(![1, 2].contains(model.voiceWakeWord))
                         }
                         HStack {

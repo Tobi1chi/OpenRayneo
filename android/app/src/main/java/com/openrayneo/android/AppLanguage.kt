@@ -83,6 +83,9 @@ internal object AppLanguage {
         }
     }
 
+    /** 1 = 小雷小雷 (Chinese), 2 = OK RayNeo / Hey RayNeo (English) */
+    internal fun preferredWakeWordMode(isEnglish: Boolean): Int = if (isEnglish) 2 else 1
+
     val isEnglish: Boolean
         get() = resolveIsEnglish(mode)
 

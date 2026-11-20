@@ -47,5 +47,8 @@ class AppLanguageTest {
         assertEquals(AppLanguageMode.ZH, AppLanguage.appModeForGlassesLanguage("zh-CN"))
         assertEquals(AppLanguageMode.EN, AppLanguage.appModeForGlassesLanguage("en-US"))
         assertNull(AppLanguage.appModeForGlassesLanguage("ja-JP"))
+
+        assertEquals(1, AppLanguage.preferredWakeWordMode(isEnglish = false))
+        assertEquals(2, AppLanguage.preferredWakeWordMode(isEnglish = true))
     }
 }

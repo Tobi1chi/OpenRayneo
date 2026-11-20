@@ -26,7 +26,9 @@ internal class GlassesVoiceTransport(
         source = next
         when (next) {
             ConversationSource.NATIVE -> {
-                check(nativeActive && nativeCode in 1..6) { "请先说小雷小雷唤醒眼镜，并启用自动接听" }
+                check(nativeActive && nativeCode in 1..6) {
+                    L("请先说“小雷小雷”唤醒眼镜，并启用自动接听", "Say \"Hey RayNeo\" to wake the glasses and enable auto-answer first")
+                }
                 send(0x0d, 2, JSONObject().put("rc", 1)); send(0x0d, 9, JSONObject().put("rc", 1))
             }
             ConversationSource.ALWAYS_ON -> send(0x0f, 20, JSONObject().put("cmd", "life_log_switch")

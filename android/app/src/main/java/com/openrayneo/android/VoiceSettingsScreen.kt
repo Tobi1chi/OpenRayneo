@@ -27,7 +27,7 @@ internal fun VoiceSettingsScreen(model: AppModel, actions: UiActions) {
         VoiceField(model, "asrUrl", "WSS地址", "wss://dashscope.aliyuncs.com/api-ws/v1/inference")
         VoiceField(model, "asrModel", "模型", "qwen-audio-3.1-asr-flash-message")
         var auto by remember(model.config) { mutableStateOf(model.config.optBoolean("nativeAutoAnswer")) }
-        Row { Checkbox(auto, { auto = it; drafts["nativeAutoAnswer"] = it.toString() }); Text("小雷小雷唤醒后自动接听") }
+        Row { Checkbox(auto, { auto = it; drafts["nativeAutoAnswer"] = it.toString() }); Text(L("小雷小雷唤醒后自动接听", "Auto-answer after \"Hey RayNeo\" wake")) }
         Note("原生唤醒接听后接收音频，由ASR与说话人处理完成后交给本机 Agent。")
         var autoMemory by remember(model.config) { mutableStateOf(model.config.optString("memoryAutoSummary", "true") != "false") }
         Row { Checkbox(autoMemory, { autoMemory = it; drafts["memoryAutoSummary"] = it.toString() }); Text("自动生成滚动、日终与记录结束总结") }
@@ -41,7 +41,7 @@ internal fun VoiceSettingsScreen(model: AppModel, actions: UiActions) {
         VoiceField(model, "audioChannel", "登记诊断声道：0/1通道一、2通道二", "0")
         VoiceField(model, "speakerThreshold", "声音匹配阈值（留空用默认）", SpeakerEngine.DEFAULT_THRESHOLD.toString())
         var autoLearn by remember(model.config) { mutableStateOf(model.config.optString(SelfVoiceLearning.KEY, "true") != "false") }
-        Row { Checkbox(autoLearn, { autoLearn = it; drafts[SelfVoiceLearning.KEY] = it.toString() }); Text("“小雷小雷”唤醒轮自动更新我的声音") }
+        Row { Checkbox(autoLearn, { autoLearn = it; drafts[SelfVoiceLearning.KEY] = it.toString() }); Text(L("“小雷小雷”唤醒轮自动更新我的声音", "Auto-update my voiceprint from \"Hey RayNeo\" wake rounds")) }
         Note("唤醒轮按策略默认是你；每轮结束后在手机本机提取声音。还没有档案时累计一致人声满10秒、3段后自动建档；已有档案后只收与档案相似度≥0.50的片段，最多保留10个自动样本，不替换手动登记样本。手机与Mac档案各自独立。下次开始收音生效。")
         SectionLabel("记录总结")
         VoiceField(model, "modelUrl", "总结模型服务地址")
