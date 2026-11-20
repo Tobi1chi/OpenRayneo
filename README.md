@@ -4,25 +4,25 @@
 
 # OpenRayneo
 
-**Open-source macOS & Android companion and local Agent bridge for RayNeo iO smart glasses**
+**RayNeo iO 智能眼镜的开源 macOS / Android 伴侣与本机 Agent 接入层**
 
 <p>
-  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+  <strong>简体中文</strong> · <a href="README.en.md">English</a>
 </p>
 
 <p>
   <a href="https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5"><img src="https://img.shields.io/badge/release-v1.2.0--beta.5-2563eb?style=flat-square" alt="Release" /></a>
   <img src="https://img.shields.io/badge/macOS-13%2B%20(Apple%20Silicon)-111827?style=flat-square&logo=apple&logoColor=white" alt="macOS" />
   <img src="https://img.shields.io/badge/Android-13%2B%20(API%2033%2B)-16a34a?style=flat-square&logo=android&logoColor=white" alt="Android" />
-  <img src="https://img.shields.io/badge/i18n-English%20%7C%20%E4%B8%AD%E6%96%87-7c3aed?style=flat-square" alt="Languages" />
+  <img src="https://img.shields.io/badge/i18n-%E4%B8%AD%E6%96%87%20%7C%20English-7c3aed?style=flat-square" alt="Languages" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-64748b?style=flat-square" alt="License" /></a>
 </p>
 
 <p>
-  <a href="#features">Features</a> ·
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="#architecture--documentation">Architecture &amp; Docs</a> ·
-  <a href="#contributing">Contributing</a>
+  <a href="#核心能力">核心能力</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#架构是项目主文档">架构与文档</a> ·
+  <a href="#参与贡献">参与贡献</a>
 </p>
 
 <br />
@@ -33,42 +33,42 @@
 
 ---
 
-## Overview
+## 项目定位
 
-OpenRayneo is an independent open-source companion for **RayNeo iO** smart glasses. It exposes the device's native Bluetooth display, dual-channel microphone capture, local ASR/speaker processing, daily recording management, and local Agent APIs:
+OpenRayneo 面向 **RayNeo iO** 智能眼镜，引出设备已有能力，完成**蓝牙建链、双路收音、本地语音与声纹处理、全天记录以及本机 Agent 接入**：
 
-- **macOS (`OpenRayneoBridge`)**: Built for desktop workflows, virtual microphone routing, local HTTP API automation, recording review, and protocol testing.
-- **Android (`OpenRayneo`)**: Built for everyday wearable use, turn-by-turn navigation mirroring, on-device conversation recording, and local mobile Agent (`DSH Go`) workflows.
+- **macOS 端（`OpenRayneoBridge`）**：侧重桌面工作流扩展、虚拟麦克风路由、本机 HTTP API 自动化、录音回看与协议测试。
+- **Android 端（`OpenRayneo`）**：侧重日常随身佩戴、高德导航跟随、全天会议/对话记录与手机本机 Agent（DSH Go）协作。
 
-> Official RayNeo cloud/account features remain disabled in the current beta. Hardware firmware and native device protocols define the capability boundary; see [`.arch/ground_truth.md`](.arch/ground_truth.md) for current verified facts and open items.
+> 当前 Beta 分支停用官方账号／官方云服务；眼镜固件及官方已有协议构成设备能力边界，详见 [实现快照](.arch/ground_truth.md#当前实现与未解决问题)。
 
 ---
 
-## Features
+## 核心能力
 
-| Area | macOS (`OpenRayneoBridge`) | Android (`OpenRayneo`) |
+| 维度 | macOS (`OpenRayneoBridge`) | Android (`OpenRayneo`) |
 | --- | --- | --- |
-| **Bluetooth & Protocol** | BLE auth + RFCOMM data channel with dynamic extended headers, async ACKs, and single-byte sliding resync | Direct BLE + SPP connection, `BleIdentityGate` guard for early/duplicate MTU callbacks, and serial SPP ACKs |
-| **Audio & Virtual Mic** | CoreAudio HAL driver `v0.3.0` (Universal `arm64 + x86_64`, hidden write sinks, lock-free 64-bit C11 atomic ring buffer, auto `coreaudiod` reload on install) | Real-time Opus decoding (with malformed TOC validation), on-device speaker recognition & self-learning, encrypted recordings & WAV export |
-| **Display & HUD** | Live prompts/captions, teleprompter, notification forwarding, character video (with aspect-ratio letterboxing), live 3D glasses stage | Amap (Gaode) turn-by-turn mirroring (roundabouts, ramps, U-turns, arrival) on a strict Unicode-safe `20×5` grid, live 3D glasses stage |
-| **Agents & Switching** | Hardened localhost-only HTTP API (`127.0.0.1:8765`, constant-time Bearer auth, DNS Rebinding Host check), LAN phone record sync | **One-tap switching to/from the official RayNeo app** without unlinking or clearing data, local Agent API & DSH Go plugin |
-| **Bilingual UI (i18n)** | Runtime language switcher (`System / 简体中文 / English`) in the sidebar | Standard Android `strings.xml` + runtime switcher (`System / 简体中文 / English`) in Settings |
+| **蓝牙与协议** | BLE 认证 + RFCOMM 数据通道，支持动态扩展头、异步 ACK 回发与单字节流式滑窗自愈 | 手机直连 BLE + SPP，含 `BleIdentityGate` 防早期/重复 MTU 回调空指针及串行 ACK |
+| **音频与虚拟麦克风** | CoreAudio HAL 驱动 `v0.3.0`（`arm64 + x86_64` Universal Binary、隐藏 Sink 不污染输出列表、64 位 C11 原子环形缓冲、`postinstall` 自动重载 `coreaudiod`） | Opus 实时解码（含畸形 TOC 校验）、本机声纹识别与自学习、本地加密录音与 WAV 导出 |
+| **显示与交互** | 实时提示/字幕、提词器、通知转发、字符视频（支持保比例黑边填充）、3D 眼镜状态舞台 | 高德导航通知跟随（支持环岛/匝道/掉头/到达与 `20×5` Unicode 防越界网格）、3D 眼镜舞台 |
+| **Agent 与切换** | 仅限回环的加固 HTTP API（`127.0.0.1:8765`，常量时间 Bearer 校验 + DNS Rebinding 防护）、手机记录局域网同步 | **一键切换官方 RayNeo App**（释放蓝牙无需解绑/清数据）与一键回连、本机 Agent API 与 DSH Go 插件 |
+| **中英双语（i18n）** | 侧边栏实时切换 `跟随系统 / 简体中文 / English` | 标准 `strings.xml` + 设置页实时热切 `跟随系统 / 简体中文 / English` |
 
 ---
 
-## Quick Start
+## 快速开始
 
-### 1. Prebuilt Releases
+### 1. 直接下载预构建包
 
-Download the latest candidate from [GitHub Release v1.2.0-beta.5](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5):
+前往 [GitHub Release v1.2.0-beta.5](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5) 获取：
 
-- **macOS**: Signed Apple Silicon `.zip` app bundle (includes the built-in virtual microphone `.pkg` installer)
-- **Android**: `arm64-v8a` Release APK (uses APK v3 key rotation lineage from `v1.2.0-beta.5` onward for seamless in-place upgrades over earlier debug builds)
-- **DSH Go Plugin**: `openrayneo-dsh-0.1.8.tgz`
+- **macOS**：Apple Silicon 签名 `.zip` 应用包（内置虚拟麦克风 `.pkg` 安装包）
+- **Android**：`arm64-v8a` Release APK（自 `v1.2.0-beta.5` 起使用正式密钥 + APK v3 签名轮换，支持旧开发版无缝覆盖升级）
+- **DSH Go 插件**：`openrayneo-dsh-0.1.8.tgz`
 
-### 2. Build & Test from Source
+### 2. 从源码构建与测试
 
-**macOS (Apple Silicon · macOS 15 · Xcode Command Line Tools)**
+**macOS（Apple Silicon · macOS 15 · Xcode Command Line Tools）**
 
 ```sh
 sh scripts/prepare-mac-voice.sh
@@ -77,14 +77,14 @@ OPENRAYNEO_APP_DIR="$PWD/.build/dev-candidate/OpenRayneoBridge.app" sh scripts/b
 open .build/dev-candidate/OpenRayneoBridge.app
 ```
 
-**CoreAudio Virtual Microphone Driver & C11 Concurrency Tests**
+**CoreAudio 驱动构建与 C11 并发测试**
 
 ```sh
 clang -std=c11 -O2 -Wall -Wextra -Werror -pthread Tests/AudioDriverTests/test_audio_ring.c -o /tmp/test_audio_ring && /tmp/test_audio_ring
 sh scripts/build-audio-driver.sh
 ```
 
-**Android (JDK 17 · Android SDK 36)**
+**Android（JDK 17 · Android SDK 36）**
 
 ```sh
 cd android
@@ -92,50 +92,50 @@ cd android
 ./gradlew :app:assembleDebug
 ```
 
-> For detailed setup, release signing rotation, DSH Go plugin installation, speaker calibration, and Bluetooth recovery steps, see the [Runbook (`docs/runbook.md`)](docs/runbook.md).
+> 完整的构建参数、v3 签名轮换说明、DSH 插件部署、声纹调试与蓝牙排错步骤，请直接查看 [运行指南](docs/runbook.md)。
 
 ---
 
-## Architecture & Documentation
+## 架构是项目主文档
 
-`.arch/` is the single source of truth for system architecture, verified facts, and open decisions:
+本项目以 `.arch/` 作为唯一架构事实源，不额外维护重复的架构图与逐轮实施报告：
 
-- [Architecture Dashboard](.arch/dashboard.html) — Interactive graph generated from `.arch/graph.json`
-- [Ground Truth & Open Issues](.arch/ground_truth.md) — Verified constraints, current implementation, and known gaps
-- [North Star (`SEED.md`)](.arch/SEED.md) & [Graveyard](.arch/graveyard.md) — Goals and retired design decisions
-- [Agent & Repo Conventions (`AGENTS.md`)](AGENTS.md) — Rules for maintaining architecture, code, and lean docs
+- [架构看板](.arch/dashboard.html)：由 `.arch/graph.json` 生成的当前节点与契约视图。
+- [事实、当前实现与未解决问题](.arch/ground_truth.md)：开发和验收基线。
+- [北极星](.arch/SEED.md) 与 [废弃方案](.arch/graveyard.md)：目标与架构取舍依据。
+- [开发约定](AGENTS.md)：维护架构、代码和精简文档的规则。
 
-Update or inspect architecture nodes via `arch-grower`:
+在仓库根目录使用 `arch-grower`：
 
 ```sh
 uv run ~/.agents/skills/arch-grower/scripts/arch_cli.py focus --node speaker_channel_policy
 uv run ~/.agents/skills/arch-grower/scripts/arch_cli.py export-ui --out .arch/dashboard.html
 ```
 
-### Operational & Contract Guides
+### 核心操作与契约入口
 
-| Topic | Document |
+| 需要做什么 | 文档入口 |
 | --- | --- |
-| Install, build, Bluetooth recovery, DSH Go & audio diagnostics | [docs/runbook.md](docs/runbook.md) |
-| Wire framing, authentication, control lifecycle & protocol evidence | [docs/protocol.md](docs/protocol.md) |
-| Phone-to-Mac recording sync, cursors & write-back contract | [docs/record-sync-contract.md](docs/record-sync-contract.md) |
-| macOS localhost HTTP API routes & helper scripts | [.agents/skills/openrayneo-api/SKILL.md](.agents/skills/openrayneo-api/SKILL.md) |
-| Mobile DSH Go Agent plugin | [integrations/dsh-go/README.md](integrations/dsh-go/README.md) |
+| 安装、构建、连接、DSH、声音调试与故障恢复 | [运行指南](docs/runbook.md) |
+| 设备帧、认证、控制生命周期与逆向证据索引 | [核心协议](docs/protocol.md) |
+| 手机记录与 Mac 副本、游标、派生写回 | [同步契约](docs/record-sync-contract.md) |
+| Mac 本机 HTTP API、参数与请求脚本 | [API 技能](.agents/skills/openrayneo-api/SKILL.md) |
+| 手机本机 DSH Agent 插件 | [插件说明](integrations/dsh-go/README.md) |
 
 ---
 
-## Contributing
+## 参与贡献
 
-Contributions, bug reports, translations, and hardware test feedback are very welcome! Please read:
+欢迎提交 Issue、PR、多语言翻译或真机验证反馈！提交前请先查阅：
 
-- [Contributing Guide](CONTRIBUTING.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Security Policy](SECURITY.md)
+- [贡献指南（CONTRIBUTING.md）](CONTRIBUTING.md)
+- [社区行为准则（CODE_OF_CONDUCT.md）](CODE_OF_CONDUCT.md)
+- [安全策略（SECURITY.md）](SECURITY.md)
 
-Thanks to community contributors [@VanceHud](https://github.com/VanceHud) (CoreAudio driver v0.3.0, cross-platform hardening & unit tests), [@ruchirlives](https://github.com/ruchirlives) (English Android exploration, BLE MTU fix & official app switching), and everyone testing on real hardware.
+感谢社区贡献者 [@VanceHud](https://github.com/VanceHud)（CoreAudio 驱动 `v0.3.0` 重构、双端加固与单元测试）、[@ruchirlives](https://github.com/ruchirlives)（Android 英文社区探索、BLE MTU 修复与官方 App 切换）以及所有参与真机测试和反馈的朋友。
 
 ---
 
-## License & Disclaimer
+## 许可与声明
 
-Licensed under the [Apache License 2.0](LICENSE). OpenRayneo is an independent open-source project not affiliated with RayNeo; official APKs, firmware images, personal recordings, and signing credentials are never distributed with this repository.
+本项目基于 [Apache License 2.0](LICENSE) 开源，独立于 RayNeo；官方 APK、固件、用户录音与个人凭据不随源码分发。
