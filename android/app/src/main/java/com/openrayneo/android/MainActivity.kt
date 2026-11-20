@@ -42,7 +42,10 @@ internal class MainActivity : ComponentActivity() {
             if (model.wantsScan) {
                 model.wantsScan = false
                 if (model.bluetoothAllowed) model.scan()
-                else model.error = "连接眼镜需要附近设备权限。可以稍后在设置中授权，其他配置仍可使用。"
+                else model.error = L(
+                    "连接眼镜需要附近设备权限。可以稍后在设置中授权，其他配置仍可使用。",
+                    "Nearby Devices permission is required to connect glasses. You can grant it later in Settings.",
+                )
             }
         }
     private val locationPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -125,7 +128,7 @@ internal class MainActivity : ComponentActivity() {
                                             NavigationFeed.PACKAGE
                                         )
                                     ) {
-                                        "请先在手机安装高德地图"
+                                        L("请先在手机安装高德地图", "Install Amap (Gaode Maps) on your phone first")
                                     }
                                 )
                             }
@@ -142,7 +145,7 @@ internal class MainActivity : ComponentActivity() {
                                             RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                                             RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
                                         )
-                                        .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+                                        .putExtra(RecognizerIntent.EXTRA_LANGUAGE, AppLanguage.speechLocale)
                                 )
                             }
                         },
@@ -157,12 +160,15 @@ internal class MainActivity : ComponentActivity() {
     private fun switchGlassesApp(official: Boolean) {
         if (model.switchingApps) return
         if (!official && !model.bluetoothAllowed) {
-            model.error = "连接眼镜需要附近设备权限，请先在设置中授权。"
+            model.error = L("连接眼镜需要附近设备权限，请先在设置中授权。", "Grant Nearby Devices permission in Settings before connecting glasses.")
             return
         }
         val launch = if (official) AppSwitcher.findOfficialLaunchIntent(packageManager) else null
         if (official && launch == null) {
-            model.error = "未检测到已安装的雷鸟官方 App（com.rayneo.venus / com.rayneo.venus.pub）。"
+            model.error = L(
+                "未检测到已安装的雷鸟官方 App（com.rayneo.venus / com.rayneo.venus.pub）。",
+                "Official RayNeo app is not installed (com.rayneo.venus / com.rayneo.venus.pub).",
+            )
             return
         }
         model.switchingApps = true
@@ -179,7 +185,10 @@ internal class MainActivity : ComponentActivity() {
                     }
                     AppSwitcher.notifyPcHelperIfConfigured(model.config, official = true)
                     startActivity(launch!!)
-                    model.notice = "已释放眼镜连接并切换到官方 App，无需解绑。"
+                    model.notice = L(
+                        "已释放眼镜连接并切换到官方 App，无需解绑。",
+                        "Released glasses connection and switched to the official RayNeo app without unlinking.",
+                    )
                 } else {
                     AppSwitcher.notifyPcHelperIfConfigured(model.config, official = false)
                     delay(600)
@@ -189,15 +198,18 @@ internal class MainActivity : ComponentActivity() {
                         val selected = choices.firstOrNull { it.bluetooth.address == model.lastGlassesAddress }
                             ?: choices.singleOrNull()
                         if (selected != null) model.connect(selected, false)
-                        else model.notice = "已准备切回 OpenRayneo，请点击连接并选择你的眼镜。"
+                        else model.notice = L(
+                            "已准备切回 OpenRayneo，请点击连接并选择你的眼镜。",
+                            "Ready to reconnect OpenRayneo. Tap Connect and select your glasses.",
+                        )
                     } else {
-                        model.notice = "OpenRayneo 已连接眼镜。"
+                        model.notice = L("OpenRayneo 已连接眼镜。", "OpenRayneo is already connected to your glasses.")
                     }
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                model.error = error.message ?: "切换 App 失败"
+                model.error = error.message ?: L("切换 App 失败", "Failed to switch apps")
             } finally {
                 model.switchingApps = false
             }

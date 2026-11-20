@@ -86,6 +86,9 @@ internal class AppModel(application: Application) : AndroidViewModel(application
     var appearance by mutableStateOf(preferences.getString("appearance", "system") ?: "system")
         private set
 
+    val language: String
+        get() = AppLanguage.mode.key
+
     var deviceName by
         mutableStateOf(preferences.getString("deviceName", "RayNeo iO") ?: "RayNeo iO")
         private set
@@ -138,6 +141,7 @@ internal class AppModel(application: Application) : AndroidViewModel(application
         }
 
     init {
+        AppLanguage.init(context)
         attempt {
             config = settings.read()
             resetFormDrafts()
@@ -326,6 +330,10 @@ internal class AppModel(application: Application) : AndroidViewModel(application
     fun changeAppearance(value: String) {
         appearance = value
         preferences.edit().putString("appearance", value).apply()
+    }
+
+    fun changeLanguage(value: String) {
+        AppLanguage.set(context, value)
     }
 
     override fun onCleared() {

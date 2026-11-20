@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenRayneo</string>
+    <string name="navigation_listener_label">OpenRayneo 高德导航通知</string>
+    <string name="tab_glasses">眼镜</string>
+    <string name="tab_navigation">导航</string>
+    <string name="tab_assistant">助手</string>
+    <string name="tab_records">记录</string>
+    <string name="settings_title">设置</string>
+    <string name="language_section">语言</string>
+    <string name="language_system">跟随系统</string>
+    <string name="language_zh">简体中文</string>
+    <string name="language_en">English</string>
+</resources>

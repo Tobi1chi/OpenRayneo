@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenRayneo</string>
+    <string name="navigation_listener_label">OpenRayneo Navigation Listener</string>
+    <string name="tab_glasses">Glasses</string>
+    <string name="tab_navigation">Navigation</string>
+    <string name="tab_assistant">Assistant</string>
+    <string name="tab_records">Records</string>
+    <string name="settings_title">Settings</string>
+    <string name="language_section">Language</string>
+    <string name="language_system">Follow system</string>
+    <string name="language_zh">简体中文</string>
+    <string name="language_en">English</string>
+</resources>
