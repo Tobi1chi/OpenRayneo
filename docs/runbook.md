@@ -5,7 +5,7 @@
 ## 当前版本
 
 - 下载：[GitHub Release v1.2.0-beta.5](https://github.com/Tobi1chi/OpenRayneo/releases/tag/v1.2.0-beta.5)，含 Mac arm64 zip（1.2.0／21）、Android arm64 release APK（38）和 DSH 插件 `openrayneo-dsh-0.1.8.tgz`（也可在 `integrations/dsh-go` 用 `npm pack` 生成）。
-- Android 沿用原开发签名，同签名覆盖安装保留配置与记录，私有库与Keystore一起保留；回退用更早的 GitHub Release。
+- Android release 自 1.2.0-beta.5 之后改用 OpenRayneo 正式密钥，并以 APK v3 签名轮换（lineage）从原开发签名过渡：已装旧包的手机可直接覆盖升级、保留配置与记录；升级后旧开发签名的包（含 debug 构建）不能再覆盖，需先卸载。回退用更早的 GitHub Release（同样需卸载）。
 - 本地开发构建按下方命令生成；仓库不提交安装包、模型下载物或私钥，阶段结束后清理 `.build/` 下的构建与候选包。
 
 ## 构建
@@ -34,7 +34,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 adb shell am start -n com.openrayneo.android/.MainActivity
 ```
 
-macOS的Homebrew JDK17可通过 `JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home` 选择。默认Gradle输出在下一次构建生成；固定交付件放 `outputs/candidates/<版本>/`。原开发签名用于覆盖升级，保留 `~/.android/debug.keystore`，不在文档或源码写入密码。系统阻止ADB安装时，把APK推送到手机Download后由用户手动安装。
+macOS的Homebrew JDK17可通过 `JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home` 选择。默认Gradle输出在下一次构建生成；固定交付件放 `outputs/candidates/<版本>/`。`assembleRelease` 产出未签名包后由 `signRelease` 调 `apksigner` 做 v3-only 签名（minSdk 33）：密钥 `~/.openrayneo-signing/openrayneo-release.jks`（别名 `openrayneo`）、轮换链 `~/.openrayneo-signing/rotation.lineage`，口令存 macOS 钥匙串服务 `openrayneo-android-release`。密钥与 lineage 务必离线备份，丢失后无法再发布可覆盖升级的包；`~/.android/debug.keystore` 仍需保留以便日后再次轮换。不在文档或源码写入密码。系统阻止ADB安装时，把APK推送到手机Download后由用户手动安装。
 
 ## 连接与恢复
 

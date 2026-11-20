@@ -19,8 +19,8 @@ android {
     }
     buildTypes {
         getByName("release") {
-            // Direct-distribution Beta retains the existing certificate for in-place upgrades.
-            signingConfig = signingConfigs.getByName("debug")
+            // Signed after assembly by signRelease with the rotated OpenRayneo release key.
+            signingConfig = null
             isDebuggable = false
         }
     }
@@ -47,6 +47,23 @@ val prepareVoiceModels by tasks.registering(Exec::class) {
         file("src/main/assets/voice-models/silero-vad.onnx"), file("src/main/assets/voice-models/segmentation.int8.onnx"))
 }
 tasks.named("preBuild") { dependsOn(prepareVoiceModels, glassesModel) }
+
+// Release APKs are signed with the OpenRayneo release key plus a v3 rotation lineage from the original debug key,
+// so phones holding debug-signed installs upgrade in place. Key, lineage and the Keychain password stay outside the repo.
+val signRelease by tasks.registering(Exec::class) {
+    val keys = File(System.getProperty("user.home"), ".openrayneo-signing")
+    val apks = layout.buildDirectory.dir("outputs/apk/release").get().asFile
+    val apksigner = "${android.sdkDirectory}/build-tools/${android.buildToolsVersion}/apksigner"
+    commandLine("sh", "-c", """
+        set -eu
+        OPENRAYNEO_RELEASE_PASS=${'$'}(security find-generic-password -s openrayneo-android-release -w)
+        export OPENRAYNEO_RELEASE_PASS
+        "$apksigner" sign --ks "$keys/openrayneo-release.jks" --ks-key-alias openrayneo --ks-pass env:OPENRAYNEO_RELEASE_PASS \
+            --min-sdk-version 33 --v1-signing-enabled false --v2-signing-enabled false --lineage "$keys/rotation.lineage" --out "$apks/app-release.apk" "$apks/app-release-unsigned.apk"
+        "$apksigner" verify "$apks/app-release.apk"
+    """.trimIndent())
+}
+tasks.matching { it.name == "assembleRelease" }.configureEach { finalizedBy(signRelease) }
 
 dependencies {
     implementation(files("libs/sherpa-onnx-2.0.1.aar"))
