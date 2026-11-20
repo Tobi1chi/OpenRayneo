@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Runbook & Troubleshooting / 运行指南与排错
+    url: https://github.com/Tobi1chi/OpenRayneo/blob/main/docs/runbook.md
+    about: Check installation, Bluetooth recovery, DSH Go setup, and audio diagnostics first. / 先查看安装、蓝牙恢复与排错说明。
+  - name: Security Vulnerability / 安全漏洞报告
+    url: https://github.com/Tobi1chi/OpenRayneo/blob/main/SECURITY.md
+    about: Please report security issues privately rather than in a public issue. / 安全漏洞请勿公开披露，请按安全策略私下报告。
