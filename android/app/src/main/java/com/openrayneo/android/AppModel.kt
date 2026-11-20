@@ -353,7 +353,8 @@ internal class AppModel(application: Application) : AndroidViewModel(application
     }
 
     fun applyGlassesLanguage(code: String) = attempt {
-        service().deviceSettings.language(code) {
+        val shouldSync = AppLanguage.syncGlassesLanguage
+        service().deviceSettings.language(code, syncWakeWord = shouldSync) {
             if (!AppLanguage.syncGlassesLanguage) return@language
             val next = AppLanguage.appModeForGlassesLanguage(code) ?: return@language
             if (AppLanguage.mode != next) AppLanguage.set(context, next.key)

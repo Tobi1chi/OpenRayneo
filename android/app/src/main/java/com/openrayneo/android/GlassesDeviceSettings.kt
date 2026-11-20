@@ -49,37 +49,80 @@ internal class GlassesDeviceSettings(private val requests: GlassesRequests, priv
         apply("crown_config", 5, 6, payload(value = direction, data = JSONObject().put("double", double).put("longPress", longPress).toString()), "crownConfig") { s ->
             s.settings.optJSONObject("crownConfig")?.let { it.deviceInt("direction") == direction && it.deviceInt("double") == double && it.deviceInt("longPress") == longPress } == true }
     }
-    fun language(value: String, onConfirmed: (() -> Unit)? = null) {
+    fun language(value: String, syncWakeWord: Boolean = false, onConfirmed: (() -> Unit)? = null) {
         require(state.settings.optJSONArray("supportedLanguages")?.let { a -> (0 until a.length()).any { a.getString(it) == value } } == true)
-        apply(
-            "language_change",
-            5,
-            6,
-            payload(data = JSONObject().put("currentLang", value).toString()),
-            "currentLang",
-            matches = { it.settings.optString("currentLang") == value },
-            onConfirmed = onConfirmed,
-        )
+        check(state.loaded)
+        perform(onDone = {
+            if (state.settings.optString("currentLang").equals(value, ignoreCase = true)) {
+                onConfirmed?.invoke()
+            }
+        }) {
+            val message = applyBlocking(
+                "language_change",
+                5,
+                6,
+                payload(data = JSONObject().put("currentLang", value).toString()),
+                "currentLang",
+            ) { it.settings.optString("currentLang").equals(value, ignoreCase = true) }
+            if (syncWakeWord && state.settings.optString("currentLang").equals(value, ignoreCase = true)) {
+                val appMode = AppLanguage.appModeForGlassesLanguage(value)
+                if (appMode != null) {
+                    val targetWakeWord = AppLanguage.preferredWakeWordMode(appMode == AppLanguageMode.EN)
+                    val currentWakeWord = state.settings.optJSONObject("voiceAssistantConfig")?.deviceInt("wakeupWord")
+                    if (currentWakeWord != targetWakeWord) {
+                        applyBlocking(
+                            "set_ai_wakeup_word",
+                            16,
+                            17,
+                            payload(mode = targetWakeWord),
+                            "voiceAssistantConfig",
+                        ) { it.settings.optJSONObject("voiceAssistantConfig")?.deviceInt("wakeupWord") == targetWakeWord }
+                    }
+                }
+            }
+            message
+        }
+    }
+
+    fun wakeWord(mode: Int) {
+        require(mode in 1..2)
+        apply("set_ai_wakeup_word", 16, 17, payload(mode = mode), "voiceAssistantConfig") {
+            it.settings.optJSONObject("voiceAssistantConfig")?.deviceInt("wakeupWord") == mode
+        }
     }
 
     fun syncLanguageForApp(isEnglish: Boolean) {
         if (state.busy) return
         perform {
             if (!state.loaded) readAll()
+            var latestNotice = state.notice
             val supportedArray = state.settings.optJSONArray("supportedLanguages")
-                ?: return@perform state.notice
-            val supported = (0 until supportedArray.length()).map { supportedArray.getString(it) }
-            val target = AppLanguage.preferredGlassesLanguage(isEnglish, supported)
-                ?: return@perform state.notice
-            val current = state.settings.optString("currentLang").trim()
-            if (current.equals(target, ignoreCase = true)) return@perform state.notice
-            applyBlocking(
-                "language_change",
-                5,
-                6,
-                payload(data = JSONObject().put("currentLang", target).toString()),
-                "currentLang",
-            ) { it.settings.optString("currentLang").equals(target, ignoreCase = true) }
+            if (supportedArray != null) {
+                val supported = (0 until supportedArray.length()).map { supportedArray.getString(it) }
+                val target = AppLanguage.preferredGlassesLanguage(isEnglish, supported)
+                val current = state.settings.optString("currentLang").trim()
+                if (target != null && !current.equals(target, ignoreCase = true)) {
+                    latestNotice = applyBlocking(
+                        "language_change",
+                        5,
+                        6,
+                        payload(data = JSONObject().put("currentLang", target).toString()),
+                        "currentLang",
+                    ) { it.settings.optString("currentLang").equals(target, ignoreCase = true) }
+                }
+            }
+            val targetWakeWord = AppLanguage.preferredWakeWordMode(isEnglish)
+            val currentWakeWord = state.settings.optJSONObject("voiceAssistantConfig")?.deviceInt("wakeupWord")
+            if (currentWakeWord != targetWakeWord) {
+                latestNotice = applyBlocking(
+                    "set_ai_wakeup_word",
+                    16,
+                    17,
+                    payload(mode = targetWakeWord),
+                    "voiceAssistantConfig",
+                ) { it.settings.optJSONObject("voiceAssistantConfig")?.deviceInt("wakeupWord") == targetWakeWord }
+            }
+            latestNotice
         }
     }
     fun privacy(values: Map<String, Boolean>) {

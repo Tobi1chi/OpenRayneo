@@ -31,7 +31,10 @@ struct AssistantPanel: View {
             Text(model.environmentStatus).font(.caption)
             Toggle("模型实验模式（显式测试内建 Decision 与回复）", isOn: $model.modelExperiment).disabled(model.active || model.starting)
             Toggle("原生唤醒后自动接听（基础 ASR → 本机 Agent）", isOn: $nativeWakeAutoCapture)
-            Text("眼镜等待接听的时间较短，语音交互建议开启自动接听。开启后，小雷小雷唤醒会把音频发送给已配置的 ASR 服务；关闭时只打开窗口。正在进行的其他助手收音会话保留。")
+            Text(L(
+                "眼镜等待接听的时间较短，语音交互建议开启自动接听。开启后，小雷小雷唤醒会把音频发送给已配置的 ASR 服务；关闭时只打开窗口。正在进行的其他助手收音会话保留。",
+                "Glasses wait briefly for pickup, so auto-answer is recommended. When enabled, \"Hey RayNeo\" wake sends audio to your configured ASR; when off, it only opens this window while keeping active sessions intact."
+            ))
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("开始助手会话") { model.start(bridge: bridge) }.disabled(model.active || model.stopping || model.starting)

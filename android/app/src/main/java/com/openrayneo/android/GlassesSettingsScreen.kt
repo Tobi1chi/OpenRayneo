@@ -119,10 +119,24 @@ internal fun GlassesSettingsScreen(model: AppModel) {
             }
             settings.optJSONObject("voiceAssistantConfig")?.deviceFlag("voiceWakeup")?.let { current ->
                 var enabled by remember(current) { mutableStateOf(current) }
-                SettingsSection("语音唤醒") {
-                    SettingsToggle("允许唤醒眼镜助手", enabled, editable) { enabled = it }
-                    Note("此项修改眼镜唤醒开关；接听方式在“语音与提示词”中配置。")
-                    ToolButton(onClick = { model.attempt { model.service().deviceSettings.voiceWake(enabled) } }, enabled = editable) { Text("应用语音唤醒") }
+                val currentWakeWord = settings.optJSONObject("voiceAssistantConfig")?.deviceInt("wakeupWord")
+                var wakeWord by remember(currentWakeWord) { mutableIntStateOf(currentWakeWord ?: 1) }
+                SettingsSection(L("语音唤醒", "Voice Wake")) {
+                    SettingsToggle(L("允许唤醒眼镜助手", "Allow Glasses Voice Wake"), enabled, editable) { enabled = it }
+                    Note(L("此项修改眼镜唤醒开关；接听方式在“语音与提示词”中配置。", "Controls the glasses wake toggle; pickup behavior is configured under Voice & Prompts."))
+                    ToolButton(onClick = { model.attempt { model.service().deviceSettings.voiceWake(enabled) } }, enabled = editable) { Text(L("应用语音唤醒", "Apply Voice Wake")) }
+                    if (currentWakeWord != null) {
+                        SettingsChoice(
+                            L("唤醒词", "Wake Word"),
+                            wakeWord,
+                            listOf(1 to "小雷小雷", 2 to "OK RayNeo / Hey RayNeo"),
+                            editable,
+                        ) { wakeWord = it }
+                        ToolButton(
+                            onClick = { model.attempt { model.service().deviceSettings.wakeWord(wakeWord) } },
+                            enabled = editable && wakeWord in 1..2,
+                        ) { Text(L("应用唤醒词", "Apply Wake Word")) }
+                    }
                 }
             }
             val units = settings.optJSONObject("systemUnitsConfig")

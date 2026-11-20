@@ -7,7 +7,13 @@ import org.json.JSONObject
 import java.util.UUID
 
 internal enum class ConversationMode(val title: String) { DAILY("日常"), MEETING("会议"), ENROLL("声音登记") }
-internal enum class ConversationSource(val title: String) { REALTIME("实时双麦"), NATIVE("小雷小雷"), ALWAYS_ON("全天智记") }
+internal enum class ConversationSource(private val zhTitle: String, private val enTitle: String) {
+    REALTIME("实时双麦", "Dual Mic"),
+    NATIVE("小雷小雷", "Hey RayNeo"),
+    ALWAYS_ON("全天智记", "LifeLog");
+
+    val title: String get() = L(zhTitle, enTitle)
+}
 internal data class VoiceMatch(val personId: String, val score: Float) {
     fun json() = JSONObject().put("personId", personId).put("score", score)
 }

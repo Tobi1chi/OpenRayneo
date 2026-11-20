@@ -74,6 +74,11 @@ final class AppLanguageStore: ObservableObject {
         if normalized.hasPrefix("en") { return .en }
         return nil
     }
+
+    /// 1 = 小雷小雷 (Chinese), 2 = OK RayNeo / Hey RayNeo (English)
+    nonisolated static func preferredWakeWordMode(isEnglish: Bool) -> Int {
+        isEnglish ? 2 : 1
+    }
 }
 
 func L(_ zh: String, _ en: String) -> String {

@@ -586,7 +586,9 @@ final class DesktopBridge: ObservableObject {
 
     func startAssistantNative(duration: Int) async throws -> String {
         try await ensureConnected()
-        guard let id = nativeWakeID, nativeAssistantActive else { throw DesktopError(message: "请先说小雷小雷唤醒眼镜。") }
+        guard let id = nativeWakeID, nativeAssistantActive else {
+            throw DesktopError(message: L("请先说“小雷小雷”唤醒眼镜。", "Say \"Hey RayNeo\" to wake the glasses first."))
+        }
         try await stopCurrent()
         _ = try await request("/v1/assistant/native/start", body: ["wakeID": id, "duration": duration])
         activeSession = .nativeAssistant; nativeCaptureID = id

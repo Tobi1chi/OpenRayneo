@@ -127,7 +127,7 @@ struct LocalVoicePanel: View {
             }
             GroupBox("本机声音档案") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Toggle("“小雷小雷”唤醒轮自动更新我的声音", isOn: $autoLearn)
+                    Toggle(L("“小雷小雷”唤醒轮自动更新我的声音", "Auto-update my voiceprint from \"Hey RayNeo\" wake rounds"), isOn: $autoLearn)
                     Text("唤醒轮按策略默认是你；结束后在本机提取声音。还没有档案时，累计一致人声满10秒、3段后自动建档；已有档案后只收与档案相似度≥0.50的片段，最多保留10个自动样本，手动登记的样本不会被替换。Mac与手机档案各自独立。")
                         .font(.caption).foregroundStyle(.secondary)
                     if model.people.isEmpty { Text("尚未登记人物声音").foregroundStyle(.secondary) }
