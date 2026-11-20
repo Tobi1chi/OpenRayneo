@@ -8,6 +8,7 @@ import Foundation
 
 struct VirtualAudioDevice: Identifiable {
     let deviceID: AudioDeviceID
+    let outputDeviceID: AudioDeviceID
     let id: String
     let name: String
     let inputChannels: Int
@@ -80,10 +81,14 @@ final class MicrophonePCMQueue {
     }
 }
 
-/// Writes glasses PCM to the output side of an installed loopback audio device.
-/// Its input side is the microphone selected by Codex or another receiving app.
+/// Writes glasses PCM to the hidden sink (or loopback output side) of an installed virtual audio device.
+/// Its public input side is the microphone selected by Codex or another receiving app.
 final class VirtualMicrophone {
     static let builtInDeviceUIDs = ["com.openrayneo.microphone.channel1", "com.openrayneo.microphone.channel2"]
+    static let builtInSinkUIDs: [String: String] = [
+        "com.openrayneo.microphone.channel1": "com.openrayneo.microphone.sink1",
+        "com.openrayneo.microphone.channel2": "com.openrayneo.microphone.sink2"
+    ]
 
     static func builtInPair() throws -> [VirtualMicrophone] {
         let installed = try availableDevices()
@@ -148,7 +153,7 @@ final class VirtualMicrophone {
             try set(output, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &enabled)
             enabled = 0
             try set(output, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enabled)
-            var deviceID = target.deviceID
+            var deviceID = target.outputDeviceID
             try set(output, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &deviceID)
             var stream = AudioStreamBasicDescription()
             var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
@@ -211,12 +216,14 @@ final class VirtualMicrophone {
     }
 
     private var healthy: Bool {
-        guard let outputUnit, Self.uintProperty(device.deviceID, kAudioDevicePropertyDeviceIsAlive) == 1 else { return false }
+        guard let outputUnit,
+              Self.uintProperty(device.deviceID, kAudioDevicePropertyDeviceIsAlive) == 1,
+              Self.uintProperty(device.outputDeviceID, kAudioDevicePropertyDeviceIsAlive) == 1 else { return false }
         var current: AudioDeviceID = 0
         var running: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
         guard AudioUnitGetProperty(outputUnit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
-                                   0, &current, &size) == noErr, current == device.deviceID else { return false }
+                                   0, &current, &size) == noErr, current == device.outputDeviceID else { return false }
         size = UInt32(MemoryLayout<UInt32>.size)
         return AudioUnitGetProperty(outputUnit, kAudioOutputUnitProperty_IsRunning, kAudioUnitScope_Global,
                                     0, &running, &size) == noErr && running == 1
@@ -299,10 +306,57 @@ final class VirtualMicrophone {
                   let uid = stringProperty(id, kAudioDevicePropertyDeviceUID),
                   let name = stringProperty(id, kAudioObjectPropertyName) else { return nil }
             let inputs = channels(id, scope: kAudioDevicePropertyScopeInput)
+            guard inputs > 0 else { return nil }
+            if let sinkUID = builtInSinkUIDs[uid],
+               let sinkID = translateUIDToDevice(sinkUID),
+               uintProperty(sinkID, kAudioDevicePropertyDeviceIsAlive) == 1 {
+                let sinkOutputs = channels(sinkID, scope: kAudioDevicePropertyScopeOutput)
+                guard sinkOutputs > 0 else { return nil }
+                return VirtualAudioDevice(
+                    deviceID: id,
+                    outputDeviceID: sinkID,
+                    id: uid,
+                    name: name,
+                    inputChannels: inputs,
+                    outputChannels: sinkOutputs
+                )
+            }
             let outputs = channels(id, scope: kAudioDevicePropertyScopeOutput)
-            guard inputs > 0, outputs > 0 else { return nil }
-            return VirtualAudioDevice(deviceID: id, id: uid, name: name, inputChannels: inputs, outputChannels: outputs)
+            guard outputs > 0 else { return nil }
+            return VirtualAudioDevice(
+                deviceID: id,
+                outputDeviceID: id,
+                id: uid,
+                name: name,
+                inputChannels: inputs,
+                outputChannels: outputs
+            )
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private static func translateUIDToDevice(_ uid: String) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var cfUID: CFString = uid as CFString
+        var deviceID = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = withUnsafePointer(to: &cfUID) { qualifierPtr in
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                UInt32(MemoryLayout<CFString>.size),
+                qualifierPtr,
+                &size,
+                &deviceID
+            )
+        }
+        guard status == noErr, deviceID != AudioDeviceID(kAudioObjectUnknown) else {
+            return nil
+        }
+        return deviceID
     }
 
     private static func uintProperty(_ device: AudioDeviceID, _ selector: AudioObjectPropertySelector) -> UInt32? {
