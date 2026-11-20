@@ -1,6 +1,31 @@
-# Security Policy / 安全策略
+# 安全策略 / Security Policy
 
-[English](#english) · [简体中文](#简体中文)
+[简体中文](#简体中文) · [English](#english)
+
+---
+
+<a id="简体中文"></a>
+
+## 简体中文
+
+### 安全设计与边界
+
+OpenRayneo 涉及蓝牙设备控制、麦克风录音、本机 HTTP/Agent API 及加密配置，遵循以下安全基线：
+
+1. **本机接口默认仅限回环**：macOS Bridge（`127.0.0.1:8765`）与 Android 本机 Agent 服务（`127.0.0.1:8766`）默认仅监听回环地址，除 `/health` 外均要求常量时间校验 Bearer Token，并校验 `Host` 头防御 DNS Rebinding。
+2. **用户数据留在本地**：录音文件、声纹参考、Android Keystore 密钥与 macOS Keychain 凭据均保存在用户本机，除非用户显式配置外部模型接口或局域网同步，否则不会上传。
+3. **禁止泄露凭据**：切勿在 Issue、PR 或日志截图中暴露真实 Bearer Token、模型 API Key、签名密钥库（`.jks` / `.lineage`）或个人敏感录音。
+
+### 漏洞披露方式
+
+**请勿直接在公开 GitHub Issue 中披露未修复的安全漏洞。**
+
+请优先通过以下方式私下反馈：
+
+1. **GitHub 私有漏洞报告（推荐）**：在仓库 **Security** 标签页点击 **Report a vulnerability** 提交。
+2. 如暂无法使用私有报告通道，可先提一条不含漏洞细节的简短 Issue 联系维护者获取私密联系方式。
+
+提交时请尽量附带：受影响的组件与版本、复现步骤、潜在影响及修复建议。维护者通常会在 **72 小时内**响应并协同修复与公开披露。
 
 ---
 
@@ -31,28 +56,3 @@ Please include:
 - Potential impact and any suggested remediation.
 
 We aim to acknowledge security reports within **72 hours** and coordinate disclosure once a fix is ready.
-
----
-
-<a id="简体中文"></a>
-
-## 简体中文
-
-### 安全设计与边界
-
-OpenRayneo 涉及蓝牙设备控制、麦克风录音、本机 HTTP/Agent API 及加密配置，遵循以下安全基线：
-
-1. **本机接口默认仅限回环**：macOS Bridge（`127.0.0.1:8765`）与 Android 本机 Agent 服务（`127.0.0.1:8766`）默认仅监听回环地址，除 `/health` 外均要求常量时间校验 Bearer Token，并校验 `Host` 头防御 DNS Rebinding。
-2. **用户数据留在本地**：录音文件、声纹参考、Android Keystore 密钥与 macOS Keychain 凭据均保存在用户本机，除非用户显式配置外部模型接口或局域网同步，否则不会上传。
-3. **禁止泄露凭据**：切勿在 Issue、PR 或日志截图中暴露真实 Bearer Token、模型 API Key、签名密钥库（`.jks` / `.lineage`）或个人敏感录音。
-
-### 漏洞披露方式
-
-**请勿直接在公开 GitHub Issue 中披露未修复的安全漏洞。**
-
-请优先通过以下方式私下反馈：
-
-1. **GitHub 私有漏洞报告（推荐）**：在仓库 **Security** 标签页点击 **Report a vulnerability** 提交。
-2. 如暂无法使用私有报告通道，可先提一条不含漏洞细节的简短 Issue 联系维护者获取私密联系方式。
-
-提交时请尽量附带：受影响的组件与版本、复现步骤、潜在影响及修复建议。维护者通常会在 **72 小时内**响应并协同修复与公开披露。

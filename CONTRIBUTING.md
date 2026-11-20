@@ -1,61 +1,6 @@
-# Contributing to OpenRayneo / 贡献指南
+# 贡献指南 / Contributing to OpenRayneo
 
-[English](#english) · [简体中文](#简体中文)
-
----
-
-<a id="english"></a>
-
-## English
-
-Thank you for your interest in contributing to **OpenRayneo**! Whether you are fixing a Bluetooth edge case, expanding localization, improving CoreAudio/Android stability, or testing on new hardware/firmware, your help makes the project stronger.
-
-### 1. Project Boundaries & Golden Rules
-
-Before writing code, please keep these repository-wide rules in mind (see also [`AGENTS.md`](AGENTS.md)):
-
-- **No proprietary or private artifacts**: Never commit official RayNeo APKs, firmware binaries, personal voice recordings, Keystore/JKS files, rotation lineages, API tokens, or certificates.
-- **Architecture lives in `.arch/`**: Check [`.arch/ground_truth.md`](.arch/ground_truth.md) and [`.arch/dashboard.html`](.arch/dashboard.html) before proposing major structural changes. Do not hand-edit `.arch/graph.json`; use the `arch-grower` CLI if updating architecture nodes.
-- **Design tokens are generated**: Edit color semantics only under `assets/design-tokens/`, then regenerate Swift & Kotlin files with `uv run python scripts/generate-design-tokens.py`.
-- **Keep documentation lean**: Operational instructions belong in [`docs/runbook.md`](docs/runbook.md) and protocol details in [`docs/protocol.md`](docs/protocol.md). Avoid adding per-PR narrative reports or duplicate diagrams.
-- **Preserve Android upgrade compatibility**: Do not alter the release signing pipeline (`signRelease` v3 rotation lineage) or enable R8/ProGuard minification without verifying SherpaOnnx JNI and Filament 3D classes on a physical device.
-
-### 2. Development & Verification
-
-Please run the checks relevant to the areas you touched before opening a Pull Request:
-
-- **CoreAudio HAL driver (`Drivers/OpenRayneoAudio/`)**:
-  ```sh
-  clang -std=c11 -O2 -Wall -Wextra -Werror -pthread Tests/AudioDriverTests/test_audio_ring.c -o /tmp/test_audio_ring && /tmp/test_audio_ring
-  sh scripts/build-audio-driver.sh
-  ```
-- **macOS (`Sources/`)**:
-  ```sh
-  sh scripts/prepare-mac-voice.sh
-  swift build
-  ```
-- **Android (`android/`)**:
-  ```sh
-  cd android
-  ./gradlew :app:testDebugUnitTest
-  ./gradlew :app:assembleDebug
-  ```
-- **Shell / Python scripts (`scripts/`)**:
-  ```sh
-  sh -n scripts/build-audio-driver.sh scripts/package-audio-driver.sh
-  ```
-
-### 3. Pull Request Guidelines
-
-- **Keep PRs focused**: Split unrelated changes (e.g., CoreAudio driver vs. Android UI vs. i18n) into separate commits or PRs so they are easy to review and cherry-pick.
-- **Be explicit about hardware testing**: If a change touches Bluetooth transport, CoreAudio routing, or glasses display rendering and could only be tested in CI/emulator/Linux, clearly state that in the PR description.
-- **Commit style**: Use concise Conventional Commit prefixes (`feat(android): ...`, `fix(mac): ...`, `feat(audio): ...`, `docs: ...`).
-- **Co-author attribution**: When porting or building upon community work, include verified `Co-authored-by: Name <ID+username@users.noreply.github.com>` trailers so GitHub credits all contributors accurately.
-- **Localization**: For user-facing text, use the bilingual `L(zh, en)` helper on macOS/Android and keep `android/app/src/main/res/values/strings.xml` and `values-zh/strings.xml` aligned.
-
-### 4. Reporting Bugs
-
-When filing a bug report, please use the **Bug Report** issue template and include your OS version, OpenRayneo version, glasses model/firmware version, whether the official RayNeo app is connected, and relevant diagnostic logs.
+[简体中文](#简体中文) · [English](#english)
 
 ---
 
@@ -111,3 +56,58 @@ When filing a bug report, please use the **Bug Report** issue template and inclu
 ### 4. 提交 Bug 反馈
 
 请优先使用仓库内置的 **Bug Report** 表单，补充系统版本、OpenRayneo 版本、眼镜型号/固件版本、是否同时连接官方 App 以及复现日志，这能大幅加快定位速度。
+
+---
+
+<a id="english"></a>
+
+## English
+
+Thank you for your interest in contributing to **OpenRayneo**! Whether you are fixing a Bluetooth edge case, expanding localization, improving CoreAudio/Android stability, or testing on new hardware/firmware, your help makes the project stronger.
+
+### 1. Project Boundaries & Golden Rules
+
+Before writing code, please keep these repository-wide rules in mind (see also [`AGENTS.md`](AGENTS.md)):
+
+- **No proprietary or private artifacts**: Never commit official RayNeo APKs, firmware binaries, personal voice recordings, Keystore/JKS files, rotation lineages, API tokens, or certificates.
+- **Architecture lives in `.arch/`**: Check [`.arch/ground_truth.md`](.arch/ground_truth.md) and [`.arch/dashboard.html`](.arch/dashboard.html) before proposing major structural changes. Do not hand-edit `.arch/graph.json`; use the `arch-grower` CLI if updating architecture nodes.
+- **Design tokens are generated**: Edit color semantics only under `assets/design-tokens/`, then regenerate Swift & Kotlin files with `uv run python scripts/generate-design-tokens.py`.
+- **Keep documentation lean**: Operational instructions belong in [`docs/runbook.md`](docs/runbook.md) and protocol details in [`docs/protocol.md`](docs/protocol.md). Avoid adding per-PR narrative reports or duplicate diagrams.
+- **Preserve Android upgrade compatibility**: Do not alter the release signing pipeline (`signRelease` v3 rotation lineage) or enable R8/ProGuard minification without verifying SherpaOnnx JNI and Filament 3D classes on a physical device.
+
+### 2. Development & Verification
+
+Please run the checks relevant to the areas you touched before opening a Pull Request:
+
+- **CoreAudio HAL driver (`Drivers/OpenRayneoAudio/`)**:
+  ```sh
+  clang -std=c11 -O2 -Wall -Wextra -Werror -pthread Tests/AudioDriverTests/test_audio_ring.c -o /tmp/test_audio_ring && /tmp/test_audio_ring
+  sh scripts/build-audio-driver.sh
+  ```
+- **macOS (`Sources/`)**:
+  ```sh
+  sh scripts/prepare-mac-voice.sh
+  swift build
+  ```
+- **Android (`android/`)**:
+  ```sh
+  cd android
+  ./gradlew :app:testDebugUnitTest
+  ./gradlew :app:assembleDebug
+  ```
+- **Shell / Python scripts (`scripts/`)**:
+  ```sh
+  sh -n scripts/build-audio-driver.sh scripts/package-audio-driver.sh
+  ```
+
+### 3. Pull Request Guidelines
+
+- **Keep PRs focused**: Split unrelated changes (e.g., CoreAudio driver vs. Android UI vs. i18n) into separate commits or PRs so they are easy to review and cherry-pick.
+- **Be explicit about hardware testing**: If a change touches Bluetooth transport, CoreAudio routing, or glasses display rendering and could only be tested in CI/emulator/Linux, clearly state that in the PR description.
+- **Commit style**: Use concise Conventional Commit prefixes (`feat(android): ...`, `fix(mac): ...`, `feat(audio): ...`, `docs: ...`).
+- **Co-author attribution**: When porting or building upon community work, include verified `Co-authored-by: Name <ID+username@users.noreply.github.com>` trailers so GitHub credits all contributors accurately.
+- **Localization**: For user-facing text, use the bilingual `L(zh, en)` helper on macOS/Android and keep `android/app/src/main/res/values/strings.xml` and `values-zh/strings.xml` aligned.
+
+### 4. Reporting Bugs
+
+When filing a bug report, please use the **Bug Report** issue template and include your OS version, OpenRayneo version, glasses model/firmware version, whether the official RayNeo app is connected, and relevant diagnostic logs.
