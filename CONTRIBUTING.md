@@ -18,6 +18,7 @@
 - **架构事实以 `.arch/` 为准**：涉及大模块改动前，建议先看 [`.arch/ground_truth.md`](.arch/ground_truth.md) 与 [`.arch/dashboard.html`](.arch/dashboard.html)。不要手改 `.arch/graph.json`，需更新节点时通过 `arch-grower` CLI 操作。
 - **界面配色由 Design Tokens 生成**：修改颜色请编辑 `assets/design-tokens/`，再运行 `uv run python scripts/generate-design-tokens.py` 重新生成 `DesignTokens.swift` 与 `DesignTokens.kt`，不要手改生成文件。
 - **保持文档精简**：安装与排错步骤归入 [`docs/runbook.md`](docs/runbook.md)，协议细节归入 [`docs/protocol.md`](docs/protocol.md)，不新增逐轮实施报告或重复架构图。
+- **避免单体大文件**：按职责拆分为内聚的模块文件（单文件建议控制在 ~600 行以内），不继续向 `main.swift` 等入口文件堆叠业务模块。
 - **保护 Android 覆盖升级兼容**：请勿破坏 `signRelease` 的 APK v3 密钥轮换签名流程；在未通过 SherpaOnnx JNI 与 Filament 3D 真机验证前，请勿盲目开启 R8 混淆。
 
 ### 2. 本地构建与验证
@@ -73,6 +74,7 @@ Before writing code, please keep these repository-wide rules in mind (see also [
 - **Architecture lives in `.arch/`**: Check [`.arch/ground_truth.md`](.arch/ground_truth.md) and [`.arch/dashboard.html`](.arch/dashboard.html) before proposing major structural changes. Do not hand-edit `.arch/graph.json`; use the `arch-grower` CLI if updating architecture nodes.
 - **Design tokens are generated**: Edit color semantics only under `assets/design-tokens/`, then regenerate Swift & Kotlin files with `uv run python scripts/generate-design-tokens.py`.
 - **Keep documentation lean**: Operational instructions belong in [`docs/runbook.md`](docs/runbook.md) and protocol details in [`docs/protocol.md`](docs/protocol.md). Avoid adding per-PR narrative reports or duplicate diagrams.
+- **Avoid monolithic files**: Keep source files focused and cohesive (aim for <= ~600 lines per file); add new modules in dedicated files rather than growing `main.swift` or large controllers.
 - **Preserve Android upgrade compatibility**: Do not alter the release signing pipeline (`signRelease` v3 rotation lineage) or enable R8/ProGuard minification without verifying SherpaOnnx JNI and Filament 3D classes on a physical device.
 
 ### 2. Development & Verification
