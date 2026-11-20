@@ -44,6 +44,9 @@ internal class RayneoConnection(private val context: Context, private val listen
     private var classicAddress = byteArrayOf()
     private var identity = byteArrayOf()
     private var send: BluetoothGattCharacteristic? = null
+    private var pairInfo: BluetoothGattCharacteristic? = null
+    private var receiveCharacteristic: BluetoothGattCharacteristic? = null
+    private val identityGate = BleIdentityGate()
     private var pairingSequence = 0
     private var notificationSequence = 0
     private var bleDecoder = ProtocolCodec.StreamDecoder()
@@ -53,7 +56,7 @@ internal class RayneoConnection(private val context: Context, private val listen
     private data class BleWrite(val bytes: ByteArray, val completion: String?)
     private val bleWrites = ArrayDeque<BleWrite>()
     private var bleWriting = false
-    private var generation = 0
+    @Volatile private var generation = 0
     private var bondReceiver: BroadcastReceiver? = null
     private var connectionStage = "等待连接"
     private val timeout = Runnable { fail("连接超时：$connectionStage") }
@@ -183,10 +186,11 @@ internal class RayneoConnection(private val context: Context, private val listen
             if (connection !== gatt) return
             guarded {
                 check(status == BluetoothGatt.GATT_SUCCESS) { "服务发现失败：$status" }
+                if (!identityGate.servicesReady()) return@guarded
                 val service = checkNotNull(connection.getService(SERVICE)) { "设备没有 B81D 服务" }
                 send = checkNotNull(service.getCharacteristic(SEND)) { "缺少发送特征" }
-                checkNotNull(service.getCharacteristic(RECEIVE)) { "缺少接收特征" }
-                checkNotNull(service.getCharacteristic(PAIR_INFO)) { "缺少身份特征" }
+                receiveCharacteristic = checkNotNull(service.getCharacteristic(RECEIVE)) { "缺少接收特征" }
+                pairInfo = checkNotNull(service.getCharacteristic(PAIR_INFO)) { "缺少身份特征" }
                 state("发现 B81D，协商 BLE MTU…", busy = true)
                 check(connection.requestMtu(512)) { "无法启动 MTU 协商" }
             }
@@ -194,6 +198,7 @@ internal class RayneoConnection(private val context: Context, private val listen
 
         override fun onMtuChanged(connection: BluetoothGatt, mtu: Int, status: Int) {
             if (connection !== gatt) return
+            if (!identityGate.mtuReady()) return
             guarded {
                 check(status == BluetoothGatt.GATT_SUCCESS && mtu >= 160) {
                     "BLE MTU 不足：mtu=$mtu，status=$status"
@@ -201,7 +206,8 @@ internal class RayneoConnection(private val context: Context, private val listen
                 log("BLE MTU=$mtu")
                 blePayloadSize = mtu - 3
                 state("正在读取眼镜身份…", busy = true)
-                check(connection.readCharacteristic(connection.getService(SERVICE).getCharacteristic(PAIR_INFO))) {
+                val characteristic = checkNotNull(pairInfo) { "眼镜身份服务不可用，请重新连接后重试" }
+                check(connection.readCharacteristic(characteristic)) {
                     "无法读取身份特征"
                 }
             }
@@ -221,7 +227,7 @@ internal class RayneoConnection(private val context: Context, private val listen
                 // official Android client's six-byte Android ID convention (last 12 hex digits).
                 identity = if (bound.any { it != 0.toByte() }) bound else androidIdentity()
                 log("身份已读取；状态=${value[6].toInt() and 255}；身份来源=${if (bound.any { it != 0.toByte() }) "眼镜绑定" else "本应用 Android ID"}")
-                val receive = connection.getService(SERVICE).getCharacteristic(RECEIVE)
+                val receive = checkNotNull(receiveCharacteristic) { "眼镜通知服务不可用，请重新连接后重试" }
                 check(connection.setCharacteristicNotification(receive, true)) { "无法启用 BLE 通知" }
                 val descriptor = checkNotNull(receive.getDescriptor(CCCD)) { "缺少 CCCD" }
                 state("正在订阅 BLE 通知…", busy = true)
@@ -262,7 +268,7 @@ internal class RayneoConnection(private val context: Context, private val listen
                     if (frame.acknowledgement) {
                         if (bleOnly) log("收到 BLE 传输确认：seq=${frame.sequence}")
                     } else {
-                        if (frame.flags and 1 != 0) {
+                        if (frame.requiresAcknowledgement) {
                             enqueueBleFrame(ProtocolCodec.acknowledgement(frame), null)
                         }
                         if (frame.protocol == 0x10) processPairing(frame)
@@ -375,6 +381,16 @@ internal class RayneoConnection(private val context: Context, private val listen
                     val count = connection.inputStream.read(buffer)
                     check(count >= 0) { "眼镜关闭了数据流" }
                     val frames = decoder.append(buffer.copyOf(count))
+                    val acks = frames.filter { it.requiresAcknowledgement }
+                    if (acks.isNotEmpty()) {
+                        io.execute {
+                            if (session != generation || socket !== connection) return@execute
+                            runCatching {
+                                acks.forEach { connection.outputStream.write(ProtocolCodec.acknowledgement(it)) }
+                                connection.outputStream.flush()
+                            }
+                        }
+                    }
                     main.post {
                         if (session == generation) frames.forEach {
                             if (!it.acknowledgement) listener.onFrame(it, "SPP")
@@ -457,6 +473,9 @@ internal class RayneoConnection(private val context: Context, private val listen
         socket = null
         runCatching { oldSocket?.close() }
         send = null
+        pairInfo = null
+        receiveCharacteristic = null
+        identityGate.reset()
         state("已断开")
     }
 

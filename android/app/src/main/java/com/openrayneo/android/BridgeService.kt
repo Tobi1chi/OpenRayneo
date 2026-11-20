@@ -149,9 +149,24 @@ internal class BridgeService : Service() {
             stopAfterDisconnect = true
             disconnect()
         } else {
-            startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                if (PhoneLocation.allowed(this)) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
-            foreground = true
+            val granted = checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                onLog("缺少蓝牙连接权限，无法启动前台连接服务")
+                foreground = false
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            val serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                if (PhoneLocation.allowed(this)) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
+            runCatching {
+                startForeground(1, notification(), serviceTypes)
+                foreground = true
+            }.onFailure { error ->
+                onLog("前台连接服务启动失败：${error.javaClass.simpleName}")
+                foreground = false
+                stopSelf()
+            }
         }
         return START_NOT_STICKY
     }

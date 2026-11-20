@@ -185,6 +185,7 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
                                 0 ->
                                     GlassesScreen(
                                         model,
+                                        actions,
                                         { devices = true },
                                         { tab = it },
                                         { route = "device-settings" },
@@ -259,6 +260,7 @@ internal fun CompanionApp(model: AppModel, actions: UiActions) {
 @Composable
 private fun GlassesScreen(
     model: AppModel,
+    actions: UiActions,
     connect: () -> Unit,
     navigate: (Int) -> Unit,
     diagnostics: () -> Unit,
@@ -318,6 +320,27 @@ private fun GlassesScreen(
                         Text(if (state.disconnecting) "正在断开…" else "断开连接")
                     }
                     Note("断开会结束显示与收音、停止自动重连，并保留配对记录。随后可切换到其他设备连接。")
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ToolOutlinedButton(
+                        onClick = { actions.switchOfficialApp(true) },
+                        enabled = !model.switchingApps,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (model.switchingApps) "切换中…" else "切换官方 App")
+                    }
+                    if (!linked) {
+                        ToolOutlinedButton(
+                            onClick = { actions.switchOfficialApp(false) },
+                            enabled = !model.switchingApps && !busy,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("一键回连眼镜")
+                        }
+                    }
                 }
             }
         }

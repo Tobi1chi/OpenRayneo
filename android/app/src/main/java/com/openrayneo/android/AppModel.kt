@@ -90,6 +90,12 @@ internal class AppModel(application: Application) : AndroidViewModel(application
         mutableStateOf(preferences.getString("deviceName", "RayNeo iO") ?: "RayNeo iO")
         private set
 
+    var lastGlassesAddress by
+        mutableStateOf(preferences.getString("lastGlassesAddress", "") ?: "")
+        private set
+
+    var switchingApps by mutableStateOf(false)
+
     var phoneDraft by mutableStateOf("")
     var selectedContact by mutableStateOf<SelectedContact?>(null)
     var computerDraft by mutableStateOf("")
@@ -221,7 +227,11 @@ internal class AppModel(application: Application) : AndroidViewModel(application
     fun connect(device: RayneoConnection.Device, diagnostic: Boolean) = attempt {
         service().connect(device, diagnostic)
         deviceName = device.name
-        preferences.edit().putString("deviceName", deviceName).apply()
+        lastGlassesAddress = device.bluetooth.address
+        preferences.edit()
+            .putString("deviceName", deviceName)
+            .putString("lastGlassesAddress", lastGlassesAddress)
+            .apply()
     }
 
     fun saveConfig(values: Map<String, String>) = attempt {
