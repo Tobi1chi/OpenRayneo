@@ -71,6 +71,12 @@
       "source": "2026-11-20 Mac speaker-threshold-050 本人native 39.3秒",
       "note": "门槛0.50后实时10段全部voiceprint匹配登记人物，离线1组；Android待实测",
       "added_at": "2026-11-20T05:54:47"
+    },
+    {
+      "type": "human_verify",
+      "source": "2026-11-20 PR #7 (feat/community-merge) 实机与单测验收",
+      "note": "Mac(swift build+CoreAudio v0.3.0 C11单测+Universal签名包)与Android(7套JUnit4单测+v3轮换签名APK)均已通过，含main.swift 6模块拆分、双端i18n及眼镜语言/唤醒词双向同步；架构图按7个阶段折叠",
+      "added_at": "2026-11-20T11:54:58"
     }
   ]
 }

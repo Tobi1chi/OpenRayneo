@@ -6,7 +6,7 @@
 - [GT-04] (已验证) 用户明确更新说话人处理策略：眼镜双通道输入的通道1默认属于本人，只对通道2做声纹匹配和说话人分段；全天智记默认回传混合声音，需要对完整混合音频运行说话人处理。2026-11-20用户补充：“小雷小雷”基本只有本人会喊，原生唤醒轮按A方案整轮默认本人，不做声纹（插话他人亦归本人，属已接受代价）。 -> 架构约束：双通道必须保留并消费两路：本人通道走ASR与固定本人归属，环境通道走ASR与声纹/分段；按真实输入模式区分全天智记混合单声道，禁止把所有单声道输入默认当本人。音频落盘、延迟补齐、转写来源、时间锚点和Agent交付保持通道出处与旧资料兼容。
 - [GT-05] 原生“小雷小雷”连续交互复用本机Agent对话。录音记录、任务、wakeID／SID和Agent会话身份分别管理，回复核对当前轮次；显式“新建对话”轮换身份，取消仅影响归属请求。
 - [GT-06] 用户明确要求Mac每次原生capture自动保存最近一轮完整WAV，直接用于比对。独立于ASR确认流，无arm／等待窗口或额外60秒保存截断；下一完整轮成功后旧音频Trash，异常轮保留上一有效latest并区分captureID。
-- [GT-07] 用户明确以`.arch/`为项目核心文档，只保留少量操作与合同说明。常规文档收敛到根README、运行指南、核心协议和同步契约；更新现有事实／节点，停止新增逐轮报告和重复架构图。六个核心文件由主Git按普通文件跟踪，`.arch/.git`影子库仅本机保留并忽略。
+- [GT-07] 用户明确以`.arch/`为项目核心文档，只保留少量操作与合同说明。常规文档收敛到根`README.md`、`README.en.md`、标准开源社区文件（`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、`.github/`模板）、运行指南、核心协议和同步契约；核心单元测试（`Tests/`与`android/app/src/test/`）作为授权回归基线保留，代码按职责拆分为内聚模块（单文件建议≤600行，不向单体文件堆叠）。更新现有事实／节点，停止新增逐轮报告和重复架构图。六个核心文件由主Git按普通文件跟踪，`.arch/.git`影子库仅本机保留并忽略。
 
 ## 当前实现与未解决问题
 
@@ -15,6 +15,9 @@
 | 范围 | 当前事实 |
 | --- | --- |
 | 平台职责 | 双端独立接眼镜。Mac面向本机Agent、工作流及测试，全天输入主要作实验；手机面向日常与全天记录。语义决策／通用回复归外部Agent，伴侣保留基础音频、ASR、记录及内建总结。 |
+| 传输与模块 | Mac主入口已由原2978行单体`main.swift`拆分为`ProtocolCodec.swift`、`BLEReadinessSession.swift`、`RFCOMMTransport.swift`、`BridgeController.swift`、`LocalHTTPServer.swift`与`main.swift`；BLE/RFCOMM采用单字节滑窗与前瞻CRC重同步并区分超时未应答与眼镜显式拒绝，回环HTTP具非阻塞503与15s读写超时；`WAVRecording.swift`带NaN/±Inf防护；Android含`BleIdentityGate.kt` MTU空引用防护、`AppSwitcher.kt`官方RayNeo切换（独立helper URL/token）及非破坏性Keystore错误处理。 |
+| 虚拟音频驱动 | CoreAudio HAL驱动已升级至`v0.3.0`（`Drivers/OpenRayneoAudio/`）：隐藏`sink1/sink2`供Bridge写入、公开`channel1/channel2`供录屏/会议等App采集，采用64位C11原子无锁环形缓冲与128位Mach timebase，构建为`arm64 + x86_64` Universal Binary，安装`postinstall`自动重载`coreaudiod`并附C11单测（`Tests/AudioDriverTests/test_audio_ring.c`）。 |
+| 双语与同步 | 双端支持中英运行时切换（`AppLanguage.swift`／`AppLanguage.kt`）并持久化`syncGlassesLanguage`开关（默认开），双向同步App界面语言、眼镜系统语言（`language_change`）及AI唤醒词（`set_ai_wakeup_word`：`1`=小雷小雷，`2`=OK RayNeo / Hey RayNeo）；Android设置页新增唤醒词控制。 |
 | 记录 | 全天时间线＋总结；其他入口独立时间／内容／总结，统一日月日程。原音频、样本偏移与墙钟锚点保留；资源不足优先保存再补处理，历史纠正保留来源。 |
 | 同步 | 手机源权威、Mac持久副本／离线派生，文字／人物／总结默认补齐，原音按需。手机独立LAN入口8767及sync token；设备／Agent接口回环。精确字段见[同步契约](../docs/record-sync-contract.md)。 |
 | Mac回顾 | “录音资料库”为日常回顾：按天合并Mac本机录音与手机持久副本（标手机／Mac，跨零点按区间归入各天），左日程＋日总结、右摘要／说话人分段对话／播放；手机记录只读，原音经既有`/v1/records/audio`按需获取。剪辑、标记、重转写、恢复、官方云、原始ID移入“录音开发者工具”页。Mac条目无说话人数据，按段落显示；真实手机副本与获取尚待实机验收。 |
@@ -23,7 +26,7 @@
 | 人物修正 | Android37显式绑定归并来源匿名，历史ID保留；候选仅过滤与已命名人物同model、完全相同的匿名重复参考。短段保留、重叠仅标实际交集。 |
 | Mac分析 | 离线连续PCM整段SDK聚类，保持SDK成员关系；实时仍用原8秒VAD批次。最新原生会话流式WAV＋latest索引；实时双麦在“录音开发者工具”开启后同样只保留最近完整一轮（交给识别的原始布局：双路双声道、16k或48k），默认关闭。导出含只读`matchingDiagnostics`标量，无原始向量。 |
 | 当前产物 | GitHub Release `v1.2.0-beta.5`（预发布，2026-11-20）：Mac 1.2.0／build 21 arm64 zip（Apple Development签名，未公证）、Android 38 arm64 release（Release资产为原开发签名，覆盖安装保留数据；此后release改用OpenRayneo正式密钥＋v3轮换lineage，v3-only，模拟器验证旧签名安装可原位升级、数据保留，旧签名包回装被拒；密钥／lineage在 `~/.openrayneo-signing/`，口令在钥匙串）、DSH插件0.1.8。含Codex审查后的修复：学习代际失效、Android原始PCM学习与限流、合并原子写、Filament初始化失败回退、Mac手动“未知”更正显示。本地 `.build/` 与Android build候选已清理；回退用更早Release，下载与安装见[运行指南](../docs/runbook.md)。 |
-| 验证范围 | 构建／签名、存储／API／同步及定点生产类检查完成，独立审查已闭环。声音模型、真实持续吞吐、功耗及各固件硬件行为按实际输入继续验收。 |
+| 验证范围 | 构建／签名、存储／API／同步、CoreAudio C11单测、跨端协议向量（`Tests/Fixtures/protocol-vectors.json`）、7套Android JUnit4回归单测及定点生产类检查完成，独立审查（Codex）已闭环；PR #7（`feat/community-merge`）Mac与Android签名候选包已完成实机验证。声音模型、真实持续吞吐、功耗及各固件硬件行为按实际输入继续验收。 |
 
 **当前主问题：真人声纹漏认与单人误分组。** 根因已定：登记后仍“未知”主要因人物门槛0.70高于CAM++在生产计分（对≤3秒登记片段取top-3余弦均值）下的同人区间。真实59.64秒本人native输入A／B组得分0.624／0.602，6份登记参考留一互验0.659–0.755；公开四人样本同人中位0.585、仅11%≥0.70，异人最高0.199；本人native查询对公开异人≤0.08。2026-11-20起Mac与Android默认门槛改为0.50（Android `speakerThreshold`留空即用默认，曾手填的值仍优先），候选差距0.08不变。Mac新包实机复测（39.3秒本人native，2026-11-20）：实时10段全部`voiceprint`并带出登记人物，无未知／混合；离线连续分析1组，未再误分组。合成多人对话（本人native句拼入公开样本3人，`case.json` `syntheticConversation`）：门槛0.50下他人误认为本人0%，本人识别离线91–98%／实时79–92%；0.6秒抢话时实时路径把本人拆成多标签并留约21%未认，异人素材非眼镜收音、对照偏乐观。真实双路对话（本人对电脑外放AI语音，119.8秒）：ch1只在本人说话时触发、ch2只在AI说话时触发，仅抢话处重叠1.8秒；ch2的AI对本人参考最高0.107、无误认，但同一AI声音被实时路径分成A–E五个标签（A占56%）并出现单人“mixed”，带原音复测（139.6秒48k双声道）：AI在ch1低21dB、本人在ch2低5dB，ch1本人对跨次参考0.49–0.75；单一AI声音在实时跨句聚类0.6下4标签（主标签92%），0.45或质心0.5为2标签（97.7%），离线分段0.65→2组、0.75→1组，公开四人对照在实时0.4–0.6、离线0.65–0.75均保持4人；参数尚未改。唤醒轮自动学习规则复现（真实录音，`case.json` `selfLearningRepro`）：空档案两轮本人唤醒（pending 14.6秒）建档5个自动样本；建档后跨次本人ch1片段收17/21，AI 0/24、公开四人0/14；他人占多数的pending不建档；空档案时若唤醒轮全是他人仍会建到他人声音，靠“清除自动样本”或手动登记纠正。Mac实机首轮（52.6秒native，2026-11-20）结束1秒后本人档案已写入；原生会话常随该轮结束而关闭ASR日志，学习结果因此另存面板“最近一次自动学习”并写系统日志（subsystem com.openrayneo.bridge／self-voice-learning）。第二轮（32.9秒native）系统日志、面板记录与钥匙串修改时间一致（23:17:06Z）：切出5段、按已有档案5段全收、已写入。仅用当日唤醒轮按同一规则重建“纯自动”本人档案（不含手动登记，10个样本19.7秒，`case.json` `autoOnlyProfileIdentification`）：早先另一次本人native 9段实时全认；双麦ch1本人实时13段认11段（94%时长），ch2 AI 0/14、公开四人0/8；合成多人对话他人误认0，本人认出73–100%。仍余边界：干净人声不足0.8秒的短句没有嵌入，继续显示“未知”；Android新默认待装包实测；11-16录音的A／B／C误分组未在新样本复现，弱声条件下是否再现仍需观察。
 
@@ -33,8 +36,8 @@
 
 ## 实现与证据入口
 
-- `Sources/OpenRayneoBridge/`：设备接入、记录副本、原生助手、声音分析与桌面API；`Sources/AssistantCore/`：助手引擎。
-- `android/app/src/main/java/com/openrayneo/android/`：手机服务、音频／人物／记录、API与同步；`integrations/dsh-go/`：外部Agent适配。
+- `Sources/OpenRayneoBridge/`：协议编解码与双链路传输（`ProtocolCodec.swift`、`BLEReadinessSession.swift`、`RFCOMMTransport.swift`、`BridgeController.swift`、`LocalHTTPServer.swift`）、记录副本、原生助手、声音分析、双语同步（`AppLanguage.swift`）与桌面API；`Sources/AssistantCore/`：助手引擎；`Drivers/OpenRayneoAudio/`：CoreAudio HAL v0.3.0驱动。
+- `android/app/src/main/java/com/openrayneo/android/`：手机服务、音频／人物／记录、API与同步、双语与官方App切换（`AppLanguage.kt`、`BleIdentityGate.kt`、`AppSwitcher.kt`）；`integrations/dsh-go/`：外部Agent适配；`Tests/`与`android/app/src/test/`：授权核心单测基线与跨端协议测试向量。
 - `assets/models/rayneo-io.glb`／`.usdz` 是按官方配对图与教学动画重建的外观模型，尺寸按图估算。界面实时渲染该模型并随连接状态动作（未连接折叠镜腿、连接中展开并闪灯、已连接点亮镜片HUD，可拖动旋转）：Mac设备卡用SceneKit读usdz，Android欢迎页、配对引导和眼镜首页用Filament 1.75.1读glb（1.76起要求compileSdk 37）。
 - [核心协议](../docs/protocol.md)维护消息／连接合同及原始逆向索引；[运行指南](../docs/runbook.md)维护构建、安装、故障恢复；[API技能](../.agents/skills/openrayneo-api/SKILL.md)维护精确HTTP参数。
 - 唯一旧源差分仍在Ubuntu `openrayneo-lab`归档；`analysis/`保留原始逆向证据、模型实验源和本机指标，构建产物与用户Library资料分别管理。协议／CLI的已发送、设备确认与佩戴可见效果分别核验。

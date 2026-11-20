@@ -41,7 +41,8 @@ BLE 承载发现、应用认证和业务消息；Classic Bluetooth SPP 承载主
 认证使用现实现中的 challenge/device ID/协议常量计算；账户绑定 ECDH 分支尚未实现，遇到时明确失败。
 Android 当前 [RayneoConnection.kt](../android/app/src/main/java/com/openrayneo/android/RayneoConnection.kt) 仍固定 TLV 27=1，
 未同步采用 Mac 的普通重连 2；不能将 Mac 的已验流程泛化为两端已经一致。
-详细字段、常量及系统配对调用保留在 [main.swift](../Sources/OpenRayneoBridge/main.swift) 和
+详细字段、常量及系统配对调用保留在 [ProtocolCodec.swift](../Sources/OpenRayneoBridge/ProtocolCodec.swift)、
+[BLEReadinessSession.swift](../Sources/OpenRayneoBridge/BLEReadinessSession.swift) 和
 [BluetoothPairing.swift](../Sources/OpenRayneoBridge/BluetoothPairing.swift)，不要另造第二份认证算法。
 
 BLE 写入按 `maximumWriteValueLength(.withoutResponse)` 分块，并服从 `canSendWriteWithoutResponse`；
@@ -95,7 +96,9 @@ SPP 发出的请求可能经 BLE 返回；不能只在发送所在链路注册�
 所有 socket/delegate/查询按目标设备、连接 generation 与接收 epoch 隔离。
 新连接清理旧半帧、控制队列和回执等待；迟到旧回调不接管新连接。
 恢复连接不自动重放已失败的业务写；重新读取设备状态后由调用方决定下一步。
-实现：[main.swift](../Sources/OpenRayneoBridge/main.swift)、
+实现：[BridgeController.swift](../Sources/OpenRayneoBridge/BridgeController.swift)、
+[BLEReadinessSession.swift](../Sources/OpenRayneoBridge/BLEReadinessSession.swift)、
+[RFCOMMTransport.swift](../Sources/OpenRayneoBridge/RFCOMMTransport.swift)、
 [BridgeProcessLifecycle.swift](../Sources/OpenRayneoBridge/BridgeProcessLifecycle.swift)。
 
 全局前后台通知走 `0x10` 原始命令 31：前台 `1f 00 01 02`，后台 `1f 00 01 01`。
@@ -345,9 +348,9 @@ Beta 关闭官方登录、上传、云记忆/音频、固件联网下载、反�
 
 | 领域 | 当前实现 | 保留的逆向入口 |
 | --- | --- | --- |
-| 配对/双链路/恢复 | [main.swift](../Sources/OpenRayneoBridge/main.swift)、[BluetoothPairing](../Sources/OpenRayneoBridge/BluetoothPairing.swift) | [reconnect](../analysis/reverse-2026-11-03/reconnect/)、[native-protocols](../analysis/reverse-2026-11-03/native-protocols/) |
+| 配对/双链路/恢复 | [BLEReadinessSession](../Sources/OpenRayneoBridge/BLEReadinessSession.swift)、[BridgeController](../Sources/OpenRayneoBridge/BridgeController.swift)、[BluetoothPairing](../Sources/OpenRayneoBridge/BluetoothPairing.swift) | [reconnect](../analysis/reverse-2026-11-03/reconnect/)、[native-protocols](../analysis/reverse-2026-11-03/native-protocols/) |
 | 能力/早到入站队列 | [CapabilityController](../Sources/OpenRayneoBridge/CapabilityController.swift)、常驻 handler | [capability-registry-init.asm](../analysis/reverse-2026-11-03/capability-registry-init.asm)、[pending-message-enqueue.asm](../analysis/reverse-2026-11-03/pending-message-enqueue.asm) |
-| 帧/扩展/ACK | main.swift 的 ProtocolCodec、RFCOMMTransport | [transport-reader-fallback.java](../analysis/reverse-2026-11-03/transport-reader-fallback.java)、[transport-ack-manager.java](../analysis/reverse-2026-11-03/transport-ack-manager.java) |
+| 帧/扩展/ACK | [ProtocolCodec](../Sources/OpenRayneoBridge/ProtocolCodec.swift)、[RFCOMMTransport](../Sources/OpenRayneoBridge/RFCOMMTransport.swift) | [transport-reader-fallback.java](../analysis/reverse-2026-11-03/transport-reader-fallback.java)、[transport-ack-manager.java](../analysis/reverse-2026-11-03/transport-ack-manager.java) |
 | 原生/全天/实时音频 | NativeAssistantController、LifeLogCaptureStore、SpeechController | [memory-read](../analysis/reverse-2026-11-03/memory-read/)、[caption-protocols](../analysis/reverse-2026-11-03/caption-protocols/)、[后续实时入口审计](../analysis/reverse-2026-11-07/official-interactive/) |
 | 原生录音/离线/标记 | NativeRecordingController、RecordingMarker | [recording-orphan-import](../analysis/reverse-2026-11-03/recording-orphan-import/)、[recording-marks](../analysis/reverse-2026-11-03/recording-marks/)、[原始包](../analysis/reverse-2026-11-03/baseline-hci/) |
 | 文件传输 | FileTransferController | [file_transfer.proto](../analysis/reverse-2026-11-03/apk-native/file_transfer.proto)、[SDK源](../analysis/reverse-2026-11-03/jadx/sources/K5/) |
