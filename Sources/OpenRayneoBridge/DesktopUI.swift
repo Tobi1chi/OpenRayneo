@@ -424,6 +424,10 @@ private struct DesktopControlView: View {
                     .disabled(unavailable || bridge.activeSession != .video)
             }
             Text("对齐标尺包含方块、空白、全角字母和标点。先确认七行左右竖线对齐，再播放视频。").font(.caption).foregroundStyle(.secondary)
+            Toggle("保持原视频比例（黑边填充）", isOn: Binding(
+                get: { bridge.preserveVideoAspectRatio },
+                set: { bridge.setPreserveVideoAspectRatio($0) }
+            )).disabled(bridge.videoImporting || bridge.videoPlaying)
             if let video = bridge.textVideo {
                 Divider()
                 Text("\(video.name) · \(Int(video.duration)) 秒").font(.headline).textSelection(.enabled)

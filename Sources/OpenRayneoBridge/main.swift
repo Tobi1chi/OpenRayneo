@@ -663,6 +663,7 @@ private final class BLEReadinessSession: NSObject, CBCentralManagerDelegate, CBP
     private func processPairingFrames(_ peripheral: CBPeripheral) {
         let magic = Data([0xaa, 0x55])
         let acknowledgementMagic = Data([0x55, 0xaa])
+        let maxFrameBytes = 65_541
         while receiveBuffer.count >= 4 {
             let candidates = [receiveBuffer.range(of: magic), receiveBuffer.range(of: acknowledgementMagic)].compactMap { $0 }
             guard let start = candidates.min(by: { $0.lowerBound < $1.lowerBound }) else {
@@ -675,13 +676,38 @@ private final class BLEReadinessSession: NSObject, CBCentralManagerDelegate, CBP
             guard receiveBuffer.count >= 4 else { return }
             let base = receiveBuffer.startIndex
             let length = Int(receiveBuffer[base + 2]) << 8 | Int(receiveBuffer[base + 3])
+            let headerMin = receiveBuffer.count >= 7
+                ? 4 + (receiveBuffer[base + 6] & 2 == 0 ? 0 : 1) + Int(receiveBuffer[base + 6] >> 5)
+                : 4
+            if length < 4 || (receiveBuffer.count >= 7 && length < headerMin) || (receiveBuffer[base] == 0x55 && length != 4) {
+                receiveBuffer.removeFirst()
+                continue
+            }
             let frameLength = 4 + length + 2
-            guard receiveBuffer.count >= frameLength else { return }
+            if receiveBuffer.count < frameLength {
+                if receiveBuffer.count > maxFrameBytes {
+                    receiveBuffer.removeFirst()
+                    continue
+                }
+                return
+            }
             let end = base + frameLength
             let frame = receiveBuffer.subdata(in: base..<end)
+            if frame[0] == 0x55 {
+                let expectedCRC = ProtocolCodec.crc16XModem(frame.subdata(in: 4..<8))
+                let storedCRC = (UInt16(frame[8]) << 8) | UInt16(frame[9])
+                if expectedCRC == storedCRC {
+                    receiveBuffer.removeSubrange(base..<end)
+                } else {
+                    receiveBuffer.removeFirst()
+                }
+                continue
+            }
+            guard let message = ProtocolCodec.decodeRemoteFrame(frame) else {
+                receiveBuffer.removeFirst()
+                continue
+            }
             receiveBuffer.removeSubrange(base..<end)
-            if frame[0] == 0x55 { continue }
-            guard let message = ProtocolCodec.decodeRemoteFrame(frame) else { continue }
             if frame[6] & 1 != 0, let sendCharacteristic,
                let receipt = try? ProtocolCodec.acknowledgement(protocolID: message.protocolID, sequence: message.sequence) {
                 enqueueBLEWrite(receipt, peripheral: peripheral, characteristic: sendCharacteristic)
@@ -1614,6 +1640,7 @@ final class RFCOMMTransport: NSObject {
     private func extractMessages() {
         let magic = Data([0xaa, 0x55])
         let acknowledgementMagic = Data([0x55, 0xaa])
+        let maxFrameBytes = 65_541
         while receiveBuffer.count >= 4 {
             let candidates = [receiveBuffer.range(of: magic), receiveBuffer.range(of: acknowledgementMagic)].compactMap { $0 }
             guard let start = candidates.min(by: { $0.lowerBound < $1.lowerBound }) else {
@@ -1625,22 +1652,42 @@ final class RFCOMMTransport: NSObject {
             }
             guard receiveBuffer.count >= 4 else { return }
             let length = Int(receiveBuffer[2]) << 8 | Int(receiveBuffer[3])
+            let headerMin = receiveBuffer.count >= 7
+                ? 4 + (receiveBuffer[6] & 2 == 0 ? 0 : 1) + Int(receiveBuffer[6] >> 5)
+                : 4
+            if length < 4 || (receiveBuffer.count >= 7 && length < headerMin) || (receiveBuffer[0] == 0x55 && length != 4) {
+                receiveBuffer = Data(receiveBuffer.dropFirst(1))
+                continue
+            }
             let frameLength = 4 + length + 2
-            guard receiveBuffer.count >= frameLength else { return }
+            if receiveBuffer.count < frameLength {
+                if receiveBuffer.count > maxFrameBytes {
+                    receiveBuffer = Data(receiveBuffer.dropFirst(1))
+                    continue
+                }
+                return
+            }
             let frame = receiveBuffer.subdata(in: 0..<frameLength)
-            receiveBuffer = receiveBuffer.subdata(in: frameLength..<receiveBuffer.count)
             if frame[0] == 0x55 {
-                if length == 4, ProtocolCodec.crc16XModem(frame.subdata(in: 4..<8)) == ((UInt16(frame[8]) << 8) | UInt16(frame[9])) {
+                if ProtocolCodec.crc16XModem(frame.subdata(in: 4..<8)) == ((UInt16(frame[8]) << 8) | UInt16(frame[9])) {
+                    receiveBuffer = receiveBuffer.subdata(in: frameLength..<receiveBuffer.count)
                     acknowledgementLock.lock(); acknowledgementsReceived += 1; acknowledgementLock.unlock()
+                } else {
+                    receiveBuffer = Data(receiveBuffer.dropFirst(1))
                 }
                 continue
             }
             if let message = ProtocolCodec.decodeRemoteFrame(frame) {
+                receiveBuffer = receiveBuffer.subdata(in: frameLength..<receiveBuffer.count)
                 if frame[6] & 1 != 0 { acknowledge(protocolID: message.protocolID, sequence: message.sequence) }
                 dispatch(message)
             } else {
                 corruptFrameHandler?(frame)
+                receiveBuffer = Data(receiveBuffer.dropFirst(1))
             }
+        }
+        if receiveBuffer.count > maxFrameBytes * 2 {
+            receiveBuffer = Data(receiveBuffer.suffix(maxFrameBytes))
         }
     }
 }
@@ -2348,11 +2395,15 @@ private struct HTTPRequest {
 }
 
 private final class LocalHTTPServer {
+    private static let maxHeaderBytes = 32_768
+    private static let maxBodyBytes = 1_000_000
+
     private let port: UInt16
     private let token: String
     private let deviceController: BridgeController?
     private let recordSync = RecordSyncController()
     private let agentInput = AgentInputController()
+    private let connectionSlots = DispatchSemaphore(value: 16)
 
     init(port: UInt16, token: String, controller: BridgeController?) {
         self.port = port
@@ -2388,8 +2439,10 @@ private final class LocalHTTPServer {
             while true {
                 let clientFD = Darwin.accept(serverFD, nil, nil)
                 guard clientFD >= 0 else { continue }
+                self.connectionSlots.wait()
                 DispatchQueue.global().async { [weak self] in
                     guard let self else { Darwin.close(clientFD); return }
+                    defer { self.connectionSlots.signal() }
                     self.handle(clientFD)
                 }
             }
@@ -2397,23 +2450,31 @@ private final class LocalHTTPServer {
         while true { RunLoop.current.run(until: Date(timeIntervalSinceNow: 1)) }
     }
 
-    private func handle(_ clientFD: Int32) {
-        defer { Darwin.close(clientFD) }
+    private func configureClientSocket(_ clientFD: Int32) {
         var noSignal: Int32 = 1
         _ = withUnsafePointer(to: &noSignal) {
             setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, $0, socklen_t(MemoryLayout<Int32>.size))
         }
+        var timeout = timeval(tv_sec: 15, tv_usec: 0)
+        _ = withUnsafePointer(to: &timeout) {
+            setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, $0, socklen_t(MemoryLayout<timeval>.size))
+        }
+        _ = withUnsafePointer(to: &timeout) {
+            setsockopt(clientFD, SOL_SOCKET, SO_SNDTIMEO, $0, socklen_t(MemoryLayout<timeval>.size))
+        }
+    }
+
+    private func handle(_ clientFD: Int32) {
+        defer { Darwin.close(clientFD) }
+        configureClientSocket(clientFD)
         do {
             let request = try readRequest(clientFD)
             let (status, response) = route(request)
             let body = (try? JSONSerialization.data(withJSONObject: response, options: [.sortedKeys])) ?? Data("{}".utf8)
-            let reason = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 400 ? "Bad Request" : status == 401 ? "Unauthorized" : status == 403 ? "Forbidden" : status == 404 ? "Not Found" : status == 409 ? "Conflict" : status == 413 ? "Payload Too Large" : status == 503 ? "Service Unavailable" : status == 504 ? "Gateway Timeout" : "Internal Server Error"
-            var headers = Data("HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: \(body.count)\r\n\r\n".utf8)
-            headers.append(body)
-            headers.withUnsafeBytes { rawBuffer in
-                guard let base = rawBuffer.baseAddress else { return }
-                _ = Darwin.send(clientFD, base, rawBuffer.count, 0)
-            }
+            let reason = Self.reasonPhrase(for: status)
+            var payload = Data("HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: \(body.count)\r\n\r\n".utf8)
+            payload.append(body)
+            sendAll(clientFD, payload)
         } catch let error as BridgeError {
             writeError(clientFD, status: error.status, message: error.message)
         } catch {
@@ -2422,10 +2483,13 @@ private final class LocalHTTPServer {
     }
 
     private func route(_ request: HTTPRequest) -> (Int, [String: Any]) {
+        guard Self.isAllowedHostHeader(request.headers["host"]) else {
+            return (403, ["error": "forbidden host header"])
+        }
         if request.method == "GET", request.path == "/health" {
             return (200, ["ok": true, "bleReady": deviceController?.isBLEReady ?? false, "rfcommConnected": deviceController?.isConnected ?? false])
         }
-        guard request.headers["authorization"] == "Bearer \(token)" else {
+        guard Self.isValidBearerHeader(request.headers["authorization"], expectedToken: token) else {
             return (401, ["error": "missing or invalid bearer token"])
         }
         do {
@@ -2561,61 +2625,152 @@ private final class LocalHTTPServer {
         }
     }
 
-    private func readRequest(_ fd: Int32) throws -> HTTPRequest {
-        var data = Data()
-        var boundary: Range<Data.Index>?
-        var contentLength = 0
-        while data.count <= 1_048_576 {
-            var buffer = [UInt8](repeating: 0, count: 4096)
-            let received = buffer.withUnsafeMutableBytes { Darwin.recv(fd, $0.baseAddress, $0.count, 0) }
-            guard received > 0 else { throw BridgeError(status: 400, message: "empty request") }
-            data.append(contentsOf: buffer.prefix(received))
-            if boundary == nil, let range = data.range(of: Data("\r\n\r\n".utf8)) {
-                boundary = range
-                let headerText = String(decoding: data[..<range.lowerBound], as: UTF8.self)
-                contentLength = headerText.components(separatedBy: "\r\n").dropFirst().compactMap { line -> Int? in
-                    let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
-                    return parts.count == 2 && parts[0] == "content-length" ? Int(parts[1]) : nil
-                }.first ?? 0
-                guard contentLength >= 0 else { throw BridgeError(status: 400, message: "invalid content-length") }
-                guard contentLength <= 1_000_000 else { throw BridgeError(status: 413, message: "request body too large") }
+    private static func parseRequestBuffer(_ data: Data) throws -> HTTPRequest? {
+        guard let boundary = data.range(of: Data("\r\n\r\n".utf8)) else {
+            if data.count > maxHeaderBytes {
+                throw BridgeError(status: 431, message: "request headers too large")
             }
-            if let boundary, data.count >= boundary.upperBound + contentLength { break }
+            return nil
         }
-        guard let boundary else { throw BridgeError(status: 400, message: "malformed HTTP request") }
-        let headerText = String(decoding: data[..<boundary.lowerBound], as: UTF8.self)
+        let headerBytesCount = data.distance(from: data.startIndex, to: boundary.lowerBound)
+        guard headerBytesCount <= maxHeaderBytes else {
+            throw BridgeError(status: 431, message: "request headers too large")
+        }
+        let headerText = String(decoding: data[data.startIndex..<boundary.lowerBound], as: UTF8.self)
         let lines = headerText.components(separatedBy: "\r\n")
         guard let firstLine = lines.first else { throw BridgeError(status: 400, message: "malformed request line") }
         let requestParts = firstLine.split(separator: " ")
         guard requestParts.count >= 2 else { throw BridgeError(status: 400, message: "malformed request line") }
+        let rawTarget = String(requestParts[1])
+        let components = URLComponents(string: rawTarget)
+        let path = components?.path ?? String(rawTarget.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+        guard !path.isEmpty, path.hasPrefix("/") else { throw BridgeError(status: 400, message: "malformed request line") }
+
         var headers: [String: String] = [:]
-        for line in lines.dropFirst() {
-            let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            if parts.count == 2 { headers[parts[0].lowercased()] = parts[1] }
+        for line in lines.dropFirst() where !line.isEmpty {
+            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { throw BridgeError(status: 400, message: "malformed header line") }
+            headers[parts[0].trimmingCharacters(in: .whitespaces).lowercased()] = parts[1].trimmingCharacters(in: .whitespaces)
         }
-        let bodyStart = boundary.upperBound
-        let bodyEnd = bodyStart + contentLength
-        let components = URLComponents(string: String(requestParts[1]))
+        let contentLength: Int
+        if let rawLength = headers["content-length"] {
+            guard let parsed = Int(rawLength), parsed >= 0 else { throw BridgeError(status: 400, message: "invalid content-length") }
+            guard parsed <= maxBodyBytes else { throw BridgeError(status: 413, message: "request body too large") }
+            contentLength = parsed
+        } else {
+            contentLength = 0
+        }
+
+        let bodyOffset = data.distance(from: data.startIndex, to: boundary.upperBound)
+        let requiredBytes = bodyOffset + contentLength
+        guard data.count >= requiredBytes else { return nil }
+
+        let bodyStart = data.index(data.startIndex, offsetBy: bodyOffset)
+        let bodyEnd = data.index(bodyStart, offsetBy: contentLength)
         var query: [String: Any] = [:]
         for item in components?.queryItems ?? [] {
             if let value = item.value { query[item.name] = Int(value).map { $0 as Any } ?? value }
         }
         return HTTPRequest(
             method: String(requestParts[0]),
-            path: components?.path ?? String(requestParts[1]),
+            path: path,
             headers: headers,
             body: contentLength == 0 && !query.isEmpty ? try JSONSerialization.data(withJSONObject: query) : data.subdata(in: bodyStart..<bodyEnd)
         )
     }
 
+    private static func isAllowedHostHeader(_ rawHost: String?) -> Bool {
+        guard let rawHost = rawHost?.trimmingCharacters(in: .whitespaces), !rawHost.isEmpty else { return true }
+        let lower = rawHost.lowercased()
+        if lower.hasPrefix("[::1]") {
+            let rest = lower.dropFirst(5)
+            return rest.isEmpty || (rest.first == ":" && UInt16(rest.dropFirst()) != nil)
+        }
+        let parts = lower.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        if parts.count == 2 {
+            guard UInt16(parts[1]) != nil else { return false }
+        }
+        let host = String(parts[0])
+        return host == "127.0.0.1" || host == "localhost"
+    }
+
+    private static func isValidBearerHeader(_ header: String?, expectedToken: String) -> Bool {
+        guard let header, header.hasPrefix("Bearer ") else { return false }
+        let candidate = Array(header.dropFirst("Bearer ".count).utf8)
+        let expected = Array(expectedToken.utf8)
+        guard !expected.isEmpty else { return false }
+        var diff = candidate.count ^ expected.count
+        let count = max(candidate.count, expected.count)
+        for index in 0..<count {
+            let lhs = index < candidate.count ? candidate[index] : 0
+            let rhs = index < expected.count ? expected[index] : 0
+            diff |= Int(lhs ^ rhs)
+        }
+        return diff == 0
+    }
+
+    private func readRequest(_ fd: Int32) throws -> HTTPRequest {
+        let maxReadLimit = Self.maxHeaderBytes + Self.maxBodyBytes + 4096
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        while data.count <= maxReadLimit {
+            let received = buffer.withUnsafeMutableBytes { Darwin.recv(fd, $0.baseAddress, $0.count, 0) }
+            if received < 0 {
+                if errno == EINTR { continue }
+                if errno == EAGAIN || errno == EWOULDBLOCK {
+                    throw BridgeError(status: 408, message: "request timed out")
+                }
+                throw BridgeError(status: 400, message: "socket read failed")
+            }
+            if received == 0 { break }
+            data.append(contentsOf: buffer.prefix(received))
+            if let request = try Self.parseRequestBuffer(data) { return request }
+        }
+        if let request = try Self.parseRequestBuffer(data) { return request }
+        throw BridgeError(status: 400, message: data.isEmpty ? "empty request" : "incomplete HTTP request")
+    }
+
+    private func sendAll(_ fd: Int32, _ data: Data) {
+        data.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress else { return }
+            var totalSent = 0
+            while totalSent < rawBuffer.count {
+                let sent = Darwin.send(fd, base.advanced(by: totalSent), rawBuffer.count - totalSent, 0)
+                if sent > 0 {
+                    totalSent += sent
+                } else if sent < 0 && errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
+        }
+    }
+
     private func writeError(_ fd: Int32, status: Int, message: String) {
-        let response = (try? JSONSerialization.data(withJSONObject: ["error": message])) ?? Data("{}".utf8)
-        let reason = status == 503 ? "Service Unavailable" : status == 413 ? "Payload Too Large" : "Bad Request"
+        let response = (try? JSONSerialization.data(withJSONObject: ["error": message], options: [.sortedKeys])) ?? Data("{}".utf8)
+        let reason = Self.reasonPhrase(for: status)
         var bytes = Data("HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: \(response.count)\r\n\r\n".utf8)
         bytes.append(response)
-        bytes.withUnsafeBytes { rawBuffer in
-            guard let base = rawBuffer.baseAddress else { return }
-            _ = Darwin.send(fd, base, rawBuffer.count, 0)
+        sendAll(fd, bytes)
+    }
+
+    private static func reasonPhrase(for status: Int) -> String {
+        switch status {
+        case 200: return "OK"
+        case 202: return "Accepted"
+        case 400: return "Bad Request"
+        case 401: return "Unauthorized"
+        case 403: return "Forbidden"
+        case 404: return "Not Found"
+        case 408: return "Request Timeout"
+        case 409: return "Conflict"
+        case 413: return "Payload Too Large"
+        case 431: return "Request Header Fields Too Large"
+        case 502: return "Bad Gateway"
+        case 503: return "Service Unavailable"
+        case 504: return "Gateway Timeout"
+        default: return "Internal Server Error"
         }
     }
 }

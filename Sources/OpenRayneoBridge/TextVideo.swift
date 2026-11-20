@@ -66,7 +66,29 @@ struct TextVideo: Sendable {
     let frames: [TextVideoFrame]
     let duration: Double
 
-    static func load(_ url: URL) async throws -> TextVideo {
+    static func targetViewport(sourceWidth: Double, sourceHeight: Double, preserveAspectRatio: Bool) -> CGRect {
+        guard preserveAspectRatio, sourceWidth > 0, sourceHeight > 0 else {
+            return CGRect(x: 0, y: 0, width: 52, height: 28)
+        }
+        let canvasCellAspect = 26.0 / 7.0
+        let sourceAspect = sourceWidth / sourceHeight
+        let fitCellsW: Double
+        let fitCellsH: Double
+        if sourceAspect >= canvasCellAspect {
+            fitCellsW = 26.0
+            fitCellsH = 26.0 / sourceAspect
+        } else {
+            fitCellsH = 7.0
+            fitCellsW = 7.0 * sourceAspect
+        }
+        let drawW = max(1.0, min(52.0, (fitCellsW * 2.0).rounded()))
+        let drawH = max(1.0, min(28.0, (fitCellsH * 4.0).rounded()))
+        let offsetX = ((52.0 - drawW) / 2.0).rounded(.down)
+        let offsetY = ((28.0 - drawH) / 2.0).rounded(.down)
+        return CGRect(x: offsetX, y: offsetY, width: drawW, height: drawH)
+    }
+
+    static func load(_ url: URL, preserveAspectRatio: Bool = false) async throws -> TextVideo {
         let worker = Task.detached(priority: .userInitiated) { () throws -> TextVideo in
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -89,6 +111,8 @@ struct TextVideo: Sendable {
             defer { reader.cancelReading() }
             let context = CIContext(options: [.cacheIntermediates: false])
             let colorSpace = CGColorSpaceCreateDeviceGray()
+            let canvasBounds = CGRect(x: 0, y: 0, width: 52, height: 28)
+            let blackBackdrop = CIImage(color: .black).cropped(to: canvasBounds)
             var frames: [TextVideoFrame] = []
             var nextTime = 0.0
             var firstTime: Double?
@@ -101,17 +125,31 @@ struct TextVideo: Sendable {
                 let pixels: [UInt8] = autoreleasepool {
                     let image = CIImage(cvPixelBuffer: buffer).transformed(by: transform)
                     let origin = image.extent.origin
-                    // Fill the character canvas. Character aspect differs across glasses fonts.
-                    let verticalScale = 28 / image.extent.height
+                    let viewport = Self.targetViewport(
+                        sourceWidth: image.extent.width,
+                        sourceHeight: image.extent.height,
+                        preserveAspectRatio: preserveAspectRatio
+                    )
+                    let verticalScale = viewport.height / image.extent.height
                     let scaled = image.transformed(by: CGAffineTransform(translationX: -origin.x, y: -origin.y))
                         .clampedToExtent()
                         .applyingFilter("CILanczosScaleTransform", parameters: [
                             kCIInputScaleKey: verticalScale,
-                            kCIInputAspectRatioKey: (52 / image.extent.width) / verticalScale
-                        ]).cropped(to: CGRect(x: 0, y: 0, width: 52, height: 28))
+                            kCIInputAspectRatioKey: (viewport.width / image.extent.width) / verticalScale
+                        ])
+                        .cropped(to: CGRect(x: 0, y: 0, width: viewport.width, height: viewport.height))
+                    let composed: CIImage
+                    if preserveAspectRatio {
+                        composed = scaled
+                            .transformed(by: CGAffineTransform(translationX: viewport.origin.x, y: viewport.origin.y))
+                            .composited(over: blackBackdrop)
+                            .cropped(to: canvasBounds)
+                    } else {
+                        composed = scaled
+                    }
                     var pixels = [UInt8](repeating: 0, count: 52 * 28)
                     pixels.withUnsafeMutableBytes {
-                        context.render(scaled, toBitmap: $0.baseAddress!, rowBytes: 52, bounds: CGRect(x: 0, y: 0, width: 52, height: 28), format: .L8, colorSpace: colorSpace)
+                        context.render(composed, toBitmap: $0.baseAddress!, rowBytes: 52, bounds: canvasBounds, format: .L8, colorSpace: colorSpace)
                     }
                     return pixels
                 }
